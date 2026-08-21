@@ -1,0 +1,46 @@
+import type {TimelineEvent} from '../types';
+
+export const demoEvents: TimelineEvent[] = [
+	{type: 'message', id: 'them-1', from: 'them', text: 'yo have you seen this', startSec: 0},
+	{type: 'typing', id: 'me-typing-1', durationSec: 1.2, startSec: 1.0},
+	{type: 'message', id: 'me-1', from: 'me', text: 'seen what 👀', startSec: 2.3},
+	{type: 'message', id: 'them-2', from: 'them', text: 'the notification bug thing', startSec: 3.6},
+	{
+		type: 'message',
+		id: 'them-3',
+		from: 'them',
+		text: "people are saying it's shadowbanning uploads",
+		startSec: 4.9,
+	},
+	{type: 'typing', id: 'me-typing-2', durationSec: 1.4, startSec: 6.3},
+	{type: 'message', id: 'me-2', from: 'me', text: "lol that's not real", startSec: 7.8},
+	{
+		type: 'message',
+		id: 'me-3',
+		from: 'me',
+		text: "algorithms don't work like that 😂",
+		startSec: 9.0,
+	},
+	{type: 'reaction', id: 'react-1', targetId: 'them-3', emoji: '😂', startSec: 10.3},
+	{type: 'typing', id: 'them-typing-1', durationSec: 1.4, startSec: 10.8},
+	{
+		type: 'message',
+		id: 'them-4',
+		from: 'them',
+		text: "idk man people are testing it and it's tracking",
+		startSec: 12.3,
+	},
+	{type: 'message', id: 'me-4', from: 'me', text: 'send me the post', startSec: 13.8},
+	{type: 'message', id: 'me-5', from: 'me', text: "I'll check it myself 🔥", startSec: 15.0},
+	{type: 'message', id: 'them-5', from: 'them', text: 'bro just try it and see 💀', startSec: 16.5},
+	{type: 'typing', id: 'me-typing-3', durationSec: 1.2, startSec: 18.0},
+	{
+		type: 'message',
+		id: 'me-6',
+		from: 'me',
+		text: "you're actually unwell for this",
+		startSec: 19.4,
+	},
+	{type: 'message', id: 'them-6', from: 'them', text: '🤷', startSec: 20.6},
+	{type: 'message', id: 'me-7', from: 'me', text: 'sending screenshot rn', startSec: 21.6},
+];

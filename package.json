@@ -1,0 +1,26 @@
+{
+  "name": "insta-dm-reel",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "remotion studio",
+    "build": "remotion render",
+    "upgrade": "remotion upgrade",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.290",
+    "@remotion/zod-types": "4.0.290",
+    "emoji-regex": "10.4.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.290",
+    "zod": "3.22.3"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.1",
+    "@types/react-dom": "18.3.1",
+    "typescript": "5.5.4"
+  }
+}
