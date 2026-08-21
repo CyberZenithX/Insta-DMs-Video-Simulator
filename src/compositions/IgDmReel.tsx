@@ -5,7 +5,8 @@ import type {IgDmReelProps, ReactionEvent} from '../types';
 import {useInterFontReady} from '../lib/font';
 import {buildSlots, computeFrameLayout, lastActiveFrame} from '../lib/timeline';
 import {computeReactions} from '../lib/reactions';
-import {layout} from '../tokens';
+import {layout, colors, sentGradientStops} from '../tokens';
+import {themeGradients, themeBackgroundCss, themeBubbleStops} from '../themes';
 import {FPS, WIDTH, HEIGHT} from '../constants';
 import {Background} from '../components/Background';
 import {PhoneFrame} from '../components/PhoneFrame';
@@ -19,7 +20,7 @@ export const calculateIgDmReelMetadata: CalculateMetadataFunction<IgDmReelProps>
 };
 
 export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
-	const {events, receiver, clock, background, scrollAnchor, spring: springConfig} = props;
+	const {events, receiver, clock, background, theme, scrollAnchor, spring: springConfig} = props;
 	const frame = useCurrentFrame();
 	const {width, height, fps} = useVideoConfig();
 	const fontReady = useInterFontReady();
@@ -29,12 +30,17 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 		[events],
 	);
 
-	// All phone-interior geometry (§3) was measured as ratios of the phone
-	// screen's own width, not the outer video canvas — the phone is a
-	// cropped-in window at layout.phoneWidthRatio of the frame (§6), so
-	// bubbles/text/chrome must be sized off phoneWidthPx or they overflow
-	// the clipped phone edge.
-	const phoneWidthPx = width * layout.phoneWidthRatio;
+	// The mockup is a full-bleed screen recording: all phone-interior
+	// geometry (§3) was measured as ratios of the real screenshot's own
+	// width (1080px, see tokens.ts), so it's sized off the full frame
+	// width, not a cropped-in window. The safeZones props stay purely
+	// informational (SafeZoneGrid) rather than shrinking the canvas.
+	const phoneWidthPx = width;
+
+	const bubbleGradientStops =
+		theme === 'none' ? sentGradientStops : themeBubbleStops(themeGradients[theme]);
+	const chatBackgroundCss =
+		theme === 'none' ? colors.chatBackground : themeBackgroundCss(themeGradients[theme]);
 
 	const slots = useMemo(() => {
 		if (!fontReady) return [];
@@ -42,8 +48,7 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 	}, [events, fps, phoneWidthPx, fontReady]);
 
 	const chromeHeightPx = phoneWidthPx * (layout.statusBarHeight + layout.headerHeight);
-	const phoneTopPx = height * layout.phoneTop;
-	const chatViewportHeightPx = height - phoneTopPx - chromeHeightPx;
+	const chatViewportHeightPx = height - chromeHeightPx;
 
 	const frameLayout = useMemo(
 		() => computeFrameLayout(slots, frame, fps, phoneWidthPx, chatViewportHeightPx, scrollAnchor, springConfig),
@@ -62,7 +67,13 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 	return (
 		<AbsoluteFill>
 			<Background background={background} />
-			<PhoneFrame frameWidthPx={width} frameHeightPx={height} receiver={receiver} clock={clock}>
+			<PhoneFrame
+				frameWidthPx={width}
+				frameHeightPx={height}
+				receiver={receiver}
+				clock={clock}
+				backgroundCss={chatBackgroundCss}
+			>
 				{frameLayout.rows.map((row) => (
 					<Bubble
 						key={row.id}
@@ -72,6 +83,7 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 						frameWidthPx={phoneWidthPx}
 						chatViewportHeightPx={chatViewportHeightPx}
 						scrollOffsetPx={frameLayout.scrollOffsetPx}
+						gradientStops={bubbleGradientStops}
 					/>
 				))}
 				{reactions.map((reaction) => (

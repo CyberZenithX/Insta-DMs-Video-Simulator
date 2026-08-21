@@ -36,6 +36,7 @@ export const RemotionRoot: React.FC = () => {
 					},
 					clock: '9:41',
 					background: {kind: 'solid', value: '#0B0B0F'},
+					theme: 'none',
 					safeZones: defaultSafeZones,
 					scrollAnchor: 0.75,
 					spring: {damping: 20, mass: 0.6, stiffness: 180},

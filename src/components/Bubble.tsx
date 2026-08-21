@@ -7,6 +7,7 @@ import {colors, geometry, fontFamilyFallback} from '../tokens';
 import {interFontFamily} from '../lib/font';
 import type {WrappedLine} from '../lib/textMeasure';
 import {EmojiImage} from '../emoji/EmojiText';
+import type {GradientStop} from '../themes';
 
 const WrappedLineView: React.FC<{line: WrappedLine; fontSizePx: number}> = ({line, fontSizePx}) => (
 	<div style={{whiteSpace: 'pre'}}>
@@ -58,7 +59,8 @@ export const Bubble: React.FC<{
 	frameWidthPx: number;
 	chatViewportHeightPx: number;
 	scrollOffsetPx: number;
-}> = ({row, frame, fps, frameWidthPx, chatViewportHeightPx, scrollOffsetPx}) => {
+	gradientStops: GradientStop[];
+}> = ({row, frame, fps, frameWidthPx, chatViewportHeightPx, scrollOffsetPx, gradientStops}) => {
 	const [left] = bubbleXRange(row, frameWidthPx);
 	const topViewport = row.top - scrollOffsetPx;
 	const radiusPx = frameWidthPx * geometry.bubbleRadius;
@@ -81,7 +83,7 @@ export const Bubble: React.FC<{
 	} else if (row.from === 'me') {
 		const tTop = topViewport / chatViewportHeightPx;
 		const tBottom = (row.bottom - scrollOffsetPx) / chatViewportHeightPx;
-		background = bubbleGradientCss(tTop, tBottom);
+		background = bubbleGradientCss(gradientStops, tTop, tBottom);
 	} else {
 		background = colors.receivedBubble;
 	}

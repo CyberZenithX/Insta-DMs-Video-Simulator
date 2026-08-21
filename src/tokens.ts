@@ -51,16 +51,13 @@ export const geometry = {
 } as const;
 
 /**
- * Phone-window layout. Not exposed as props (§7's Props type only exposes
- * the six safeZones numbers), but chosen to sit inside the default safe
- * box (x 0→0.76, y 0.09→0.78) described in §6.
+ * Phone-window chrome. The mockup fills the full video frame edge to edge
+ * (like a real screen recording), not just the safeZones-derived box — see
+ * PhoneFrame.tsx.
  */
 export const layout = {
 	statusBarHeight: 0.045,
 	headerHeight: 0.078,
-	phoneTop: 0.09,
-	phoneWidthRatio: 0.76,
-	phoneCornerRadius: 0.11,
 } as const;
 
 export const fontFamilyFallback =

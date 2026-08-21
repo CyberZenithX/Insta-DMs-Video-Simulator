@@ -47,6 +47,20 @@ export const backgroundSchema = z.object({
 	value: z.string(),
 });
 
+/** Keep in sync with the keys of themeGradients in themes.ts, plus 'none'. */
+export const themeSchema = z.enum([
+	'none',
+	'default',
+	'berry',
+	'sweets',
+	'unicorn',
+	'maple',
+	'sushi',
+	'rocket',
+	'lollipop',
+	'shadow',
+]);
+
 export const safeZonesSchema = z.object({
 	topEnd: z.number().min(0).max(1),
 	railX: z.number().min(0).max(1),
@@ -68,6 +82,7 @@ export const igDmReelPropsSchema = z.object({
 	receiver: receiverSchema,
 	clock: z.string(),
 	background: backgroundSchema,
+	theme: themeSchema,
 	safeZones: safeZonesSchema,
 	scrollAnchor: z.number().min(0).max(1),
 	spring: springConfigSchema,
