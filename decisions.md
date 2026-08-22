@@ -1,0 +1,102 @@
+# Decisions
+
+Why things are the way they are. Most of these look arbitrary from the outside and were expensive to arrive at — check here before "cleaning up" something in this list.
+
+## Composition
+
+### Everything is a pure function of `frame`
+
+No timers, no effects driving animation, no randomness anywhere in the render path. This is what makes two renders of the same frame byte-identical, which in turn is what makes visual regressions detectable at all. It's the constraint the whole `src/lib/timeline.ts` design exists to satisfy.
+
+### Typing and its message are one slot, not two
+
+A `typing` event and the `them` message following it collapse into a single slot with two phases. The alternative — a typing bubble that unmounts and a message bubble that mounts — makes the stack grow then shrink, which reads as a visible jolt. As phases, the bubble resizes and crossfades in place.
+
+### One spring drives both the bubble and the scroll
+
+The newest bubble's entrance/resize and the scroll retarget are interpolated by the same spring value. Two independently-timed animations, however carefully tuned, drift apart and read as two separate events. `computeFrameLayout` computes the stack's cumulative bottom both before and after the current event and lerps between the two scroll targets with that one value.
+
+### Layout is measured, not estimated
+
+Canvas `measureText` drives wrap → bubble size → stack position → scroll offset. Estimating character widths was never attempted because every downstream number compounds the error.
+
+The consequence is a hard ordering requirement: **font before measurement**. `useInterFontReady()` holds `delayRender` until self-hosted Inter loads, and the composition renders black until then. It looks like a removable loading gate. It isn't — remove it and every bubble is silently mis-sized.
+
+### Inter is self-hosted, not fetched from Google Fonts
+
+A render-time CDN dependency is a flaky foundation for a pipeline whose whole value proposition is determinism, and the headless render target has no guaranteed trusted path to the CDN. The woff2 files live in `public/fonts/`.
+
+### Emoji are PNG assets, not font glyphs
+
+System emoji fonts vary by platform and render host, which breaks determinism and makes output look different depending on where it rendered. Emoji are tokenized out of message text and substituted with Noto Color Emoji PNGs keyed by codepoint.
+
+The tradeoff, worth knowing before writing scripts: **an emoji without a vendored asset fails the render.** There's no fallback path. Only a handful are currently in `public/emoji/`.
+
+### Geometry is ratios of frame width, calibrated from a real screenshot
+
+`src/tokens.ts` numbers are measurements taken off `references/dm-real.jpeg` at 1080px, expressed as ratios so a resolution change doesn't invalidate them. They're data, not design choices — when something looks off, re-measure against the reference rather than nudging by eye.
+
+## The full-bleed fix
+
+### The bug
+
+The mockup rendered at `phoneWidthRatio = 0.76`, pinned to `left: 0`, leaving ~24% of the canvas as opaque background — baked permanently into the exported video pixels.
+
+The original intent was that Instagram's floating like/comment/share rail would cover that gutter once posted. But that reasoning doesn't survive contact with reality: Instagram draws its chrome *on top of* a full-bleed video, it doesn't fill in blank space you leave for it. Anywhere the floating UI isn't drawn — the upload preview screen, a shared file, the grid — the strip is just visibly missing content. It also contradicted the composition's own calibration comment, which correctly described the geometry as measured at full 1080px width.
+
+### The fix, and the invariant it establishes
+
+The composition now fills the whole canvas like a real screen recording. **`safeZones` is informational only** — consumed by `SafeZoneGrid` to visualize where Instagram's chrome lands, never to shrink the canvas. If you find yourself multiplying the canvas width by a safe-zone value, that's the bug coming back.
+
+### What this doesn't solve
+
+Right-aligned sent bubbles now occupy roughly the same region as Instagram's icon rail. This is a genuine tension with no clean answer: bubbles hard against the right edge is what the real reference screenshot shows, but that's also exactly where the rail floats. Left as-is (favoring authenticity) and flagged rather than silently traded away. `SafeZoneGrid` visualizes the overlap.
+
+## Themes
+
+### Sampled, not eyeballed
+
+The 9 gradients were extracted by pixel-sampling top/middle/bottom of each swatch in a screenshot of Instagram's Theme picker, not matched by eye.
+
+### Sent bubbles use a *darkened* copy of the theme gradient
+
+Bubbles sample the same master gradient as the backdrop behind them — the trick that makes them shift color as they scroll. Against the classic flat-black chat that reads fine. Against a themed background of the same hue, the bubble effectively disappears: same color, same position, no visible pill, just floating text.
+
+This was caught by actually looking at a render, not by reading the code — the logic is "correct" in both cases. Fixed by darkening the theme's stops ~45% for bubbles only, which preserves the hue and the scroll-tinted motion while restoring contrast. `theme: 'none'` keeps the original hand-tuned magenta→purple→blue stops and the flat black background.
+
+## Web layer
+
+### Next.js over a bare preview page
+
+Chosen so the live `@remotion/player` preview and real MP4 rendering could live in one deployable app, which is what was actually asked for.
+
+Worth knowing: **Vercel is not Remotion's recommended cloud render target** — that's Remotion Lambda (AWS) or Cloud Run. Rendering video means running headless Chrome and encoding frames, which fights serverless execution-time and binary-size limits. This works, but it's the community pattern, not the blessed one. If render reliability becomes a problem, migrating `/api/render` to Remotion Lambda is the escape hatch rather than fighting Vercel's limits.
+
+### Bundle at build time, not per request
+
+`scripts/bundle-remotion.mjs` runs during `npm run build` so `/api/render` only has to serve an existing bundle. Bundling per request would add ~10s to every call. The cost is that `src/` changes require a re-bundle — the Next dev server won't pick them up on its own.
+
+### Timing logic is shared, deliberately
+
+`src/lib/scriptToEvents.ts` is called by both the live preview and the render route. Two implementations of "how long is the typing beat" would drift, and the preview silently lying about the output is the worst possible failure for this tool.
+
+### Four fixes that look like cruft but aren't
+
+Each of these is a real failure that was hit and diagnosed:
+
+1. **`defaultProps.ts` hardcodes `'/avatar-demo.svg'` instead of calling `staticFile()`.** Anything the API route imports must not pull in the `remotion` React barrel — the Next server build dies with `React.createContext is undefined`. `staticFile()` resolves to exactly that path outside a browser context anyway.
+2. **`serverComponentsExternalPackages`** for `@remotion/renderer` and `@sparticuz/chromium`. Webpack bundling mangles their CDP/websocket layer — the symptom was a cryptic `t.mask is not a function` at render time.
+3. **The `public/` flatten in `bundle-remotion.mjs`.** `bundle()` writes assets under `<outDir>/public/`, but a local-directory `serveUrl` is served verbatim from root, while `staticFile()` returns unprefixed paths. Mismatch means every asset 404s mid-render. Copying `public/` up to the bundle root satisfies both.
+4. **`outputFileTracingIncludes`.** The bundle is read via `fs` at runtime, not imported, so Next's tracer can't discover it and Vercel prunes it from the deployed function.
+
+### Remotion pinned at 4.0.290 despite known CVEs
+
+`extract-zip`, `webpack`, and `ws` carry advisories that only clear by bumping the whole Remotion toolchain to 4.0.515+. Left pinned to avoid destabilizing a render pipeline that had just been debugged into working. These are build/dev-time code paths, not exposed to arbitrary attacker input. Revisit deliberately, with time to re-verify renders afterward — not as a drive-by upgrade.
+
+## Repository
+
+### `main` was created from the feature branch's root commit
+
+The repo had **zero branches** when this work started, so the feature branch became the de facto default and there was nothing to open a PR against.
+
+First attempt created `main` as a true empty orphan branch; GitHub rejected the PR outright — no shared history. Fixed by resetting `main` to the feature branch's root commit (`be48984`, the reference images) and force-pushing, so the two share ancestry. Safe in this specific case because `main` was seconds old and nothing else could have been based on it. **Not** a pattern to repeat on a branch anyone else might have pulled.
