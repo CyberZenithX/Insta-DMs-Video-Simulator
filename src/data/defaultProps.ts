@@ -4,8 +4,14 @@ import type {IgDmReelProps} from '../types';
 // and the Next.js API route (plain Node context, no React) — it must stay
 // free of any import from the `remotion` package's React-bearing barrel, or
 // Next's server build crashes with "React.createContext is undefined".
-// `/avatar-demo.svg` is what `staticFile('avatar-demo.svg')` resolves to
-// outside a browser `window.remotion_staticBase` context anyway.
+//
+// So the avatar is stored as a plain root path, which is correct for the two
+// contexts that serve public/ at root: the Next.js <Player> preview, and
+// /api/render (whose bundle has public/ flattened into it). Remotion Studio
+// and the `remotion` CLI set window.remotion_staticBase and therefore need
+// staticFile() — Root.tsx, which may import the barrel, applies it there.
+
+export const defaultAvatarFile = 'avatar-demo.svg';
 
 export const defaultSafeZones = {
 	topEnd: 0.06,
@@ -18,7 +24,7 @@ export const defaultSafeZones = {
 export const defaultReceiver: IgDmReelProps['receiver'] = {
 	name: 'Jordan',
 	username: '@jordan.codes',
-	avatar: '/avatar-demo.svg',
+	avatar: `/${defaultAvatarFile}`,
 	activeNow: true,
 };
 

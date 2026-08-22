@@ -20,12 +20,18 @@ export const buildEventsFromScript = (messages: ScriptMessage[]): TimelineEvent[
 
 	messages.forEach((message, i) => {
 		if (i > 0) {
-			events.push({
-				type: 'typing',
-				id: `typing-${i}`,
-				startSec: cursor,
-				durationSec: TYPING_DURATION_SEC,
-			});
+			// Only `them` gets a visible typing indicator — you don't see your
+			// own in your own chat. The beat before a `me` message is still
+			// spent (you were composing it), so pacing is identical either way.
+			if (message.from === 'them') {
+				events.push({
+					type: 'typing',
+					id: `typing-${i}`,
+					from: 'them',
+					startSec: cursor,
+					durationSec: TYPING_DURATION_SEC,
+				});
+			}
 			cursor += TYPING_DURATION_SEC + TYPING_GAP_SEC;
 		}
 

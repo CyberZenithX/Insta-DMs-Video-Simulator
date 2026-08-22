@@ -1,5 +1,5 @@
 import {spring} from 'remotion';
-import type {TimelineEvent, SpringConfig as SpringConfigType} from '../types';
+import type {TimelineEvent, TypingEvent, SpringConfig as SpringConfigType} from '../types';
 import {computeBubbleLayout, typingBubbleSize} from './bubbleLayout';
 import {geometry} from '../tokens';
 import {lerp} from './math';
@@ -37,58 +37,91 @@ export type Slot = {
 };
 
 /**
- * Turns the raw event list into stack slots. A `typing` event followed by
- * the next `them` message becomes a single slot with two phases, so the
- * real bubble can "replace it in place" (§4/§5 of the spec) instead of the
- * stack growing by one and shrinking by one.
+ * Turns the raw event list into stack slots. A `typing` event and the `them`
+ * message it precedes become a single slot with two phases, so the real
+ * bubble can "replace it in place" (§4/§5 of the spec) instead of the stack
+ * growing by one and shrinking by one.
+ *
+ * A typing event is *only* a preamble to a message bubble's entrance — it has
+ * no independent lifetime, and nothing else can retire it (a typing-only slot
+ * stays visible for every subsequent frame). So a typing event that cannot be
+ * paired with a following `them` message must produce no slot at all, rather
+ * than being stranded in the stack forever. Pairing is resolved by lookahead
+ * to the next message event; an earlier implementation carried a mutable
+ * "pending typing" pointer that was never cleared when the next message came
+ * from `me`, which both stranded dots bubbles mid-stack and let a much later
+ * `them` message merge into a stale slot and render out of order.
  */
 export const buildSlots = (events: TimelineEvent[], fps: number, frameWidthPx: number): Slot[] => {
 	const sorted = [...events].sort((a, b) => a.startSec - b.startSec);
+
+	const nextMessageIndex = (afterIndex: number): number => {
+		for (let j = afterIndex + 1; j < sorted.length; j++) {
+			if (sorted[j].type === 'message') return j;
+		}
+		return -1;
+	};
+
+	// Map of message index -> the typing event that morphs into it. Only a
+	// 'them' typing event immediately preceding a 'them' message qualifies;
+	// everything else (a 'me' typing beat, a dangling typing event with no
+	// message after it, an earlier of two consecutive typing events) is
+	// dropped and contributes timing only.
+	const typingForMessage = new Map<number, TypingEvent>();
+
+	sorted.forEach((ev, i) => {
+		if (ev.type !== 'typing') return;
+		if ((ev.from ?? 'them') !== 'them') return;
+
+		const mi = nextMessageIndex(i);
+		if (mi === -1) return;
+
+		const message = sorted[mi];
+		if (message.type !== 'message' || message.from !== 'them') return;
+
+		// If two typing events target the same message, the latest one wins.
+		typingForMessage.set(mi, ev);
+	});
+
 	const slots: Slot[] = [];
-	let pendingThemTyping: Slot | null = null;
 
-	for (const ev of sorted) {
-		const startFrame = Math.round(ev.startSec * fps);
+	sorted.forEach((ev, i) => {
+		if (ev.type !== 'message') return;
 
-		if (ev.type === 'typing') {
-			const {widthPx, heightPx} = typingBubbleSize(frameWidthPx);
-			const slot: Slot = {
-				id: ev.id,
-				from: 'them',
-				phases: [{kind: 'typing', frame: startFrame, widthPx, heightPx}],
-			};
-			slots.push(slot);
-			pendingThemTyping = slot;
-			continue;
-		}
+		const layout = computeBubbleLayout(ev.text, frameWidthPx);
+		const messagePhase: MessagePhase = {
+			kind: 'message',
+			frame: Math.round(ev.startSec * fps),
+			text: ev.text,
+			lines: layout.lines,
+			widthPx: layout.widthPx,
+			heightPx: layout.heightPx,
+			fontSizePx: layout.fontSizePx,
+			lineHeightPx: layout.lineHeightPx,
+			paddingHPx: layout.paddingHPx,
+			paddingVPx: layout.paddingVPx,
+		};
 
-		if (ev.type === 'message') {
-			const layout = computeBubbleLayout(ev.text, frameWidthPx);
-			const messagePhase: MessagePhase = {
-				kind: 'message',
-				frame: startFrame,
-				text: ev.text,
-				lines: layout.lines,
-				widthPx: layout.widthPx,
-				heightPx: layout.heightPx,
-				fontSizePx: layout.fontSizePx,
-				lineHeightPx: layout.lineHeightPx,
-				paddingHPx: layout.paddingHPx,
-				paddingVPx: layout.paddingVPx,
-			};
-
-			if (ev.from === 'them' && pendingThemTyping) {
-				pendingThemTyping.phases.push(messagePhase);
-				pendingThemTyping.id = ev.id;
-				pendingThemTyping = null;
-				continue;
-			}
-
+		const typing = typingForMessage.get(i);
+		if (!typing) {
 			slots.push({id: ev.id, from: ev.from, phases: [messagePhase]});
+			return;
 		}
-	}
 
-	return slots;
+		const {widthPx, heightPx} = typingBubbleSize(frameWidthPx);
+		slots.push({
+			id: ev.id,
+			from: ev.from,
+			phases: [
+				{kind: 'typing', frame: Math.round(typing.startSec * fps), widthPx, heightPx},
+				messagePhase,
+			],
+		});
+	});
+
+	// Stack order is order of appearance, which for a merged slot is when its
+	// typing phase enters — not when its message lands.
+	return slots.sort((a, b) => a.phases[0].frame - b.phases[0].frame);
 };
 
 export type RenderRow = {
