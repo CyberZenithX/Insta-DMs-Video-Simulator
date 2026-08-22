@@ -2,6 +2,12 @@
 
 Status as of the session ending 2026-08-22.
 
+## Latest
+
+**The app is deployed and working on Vercel.** The initial `404: NOT_FOUND` was project configuration, not code — a clean-clone `npm run build` reproduced green locally.
+
+Since deploying, one bug was found and fixed: **typing indicators stranded permanently in the message stack** (`buildSlots` paired typing events with a mutable pointer that was never cleared when the next message came from `me`). The same root cause also rendered messages out of chronological order. See `decisions.md` → "A typing event has no independent lifetime" for the rule that replaced it. Fixed in `e765a67`; **redeploy to pick it up.**
+
 ## Where things stand
 
 | | |
@@ -30,11 +36,11 @@ Commits on the branch, oldest first:
 
 ## Not verified / open
 
-**Vercel deployment has never actually been run.** The `@sparticuz/chromium` code path only activates when `VERCEL`/`AWS_LAMBDA_FUNCTION_NAME` is set, so it could not be exercised from the dev sandbox. This is the single biggest unknown. Before relying on it:
+**Server-side MP4 rendering on Vercel has still not been confirmed end to end.** The site loads and the live preview works, but the `/api/render` path — which is where `@sparticuz/chromium` actually activates — has not been exercised on real Vercel infrastructure. Before relying on it:
 
-- Raise the `/api/render` function's **max duration** — a render alone took 15–28s locally, before Lambda cold-start on top. Default Hobby limits (10s) will not work. `maxDuration = 300` is set in code but the plan has to allow it.
-- Raise function **memory** — headless Chrome wants 1–2GB.
-- Do one real test render with function logs open.
+- Click **Generate MP4** on the deployed site once, with the function logs open.
+- Check the `/api/render` function's **max duration**. A render alone took 15–28s locally, before Lambda cold-start on top. `maxDuration = 300` is set in code, but Hobby caps it at 60 and rejects the deploy above that — so if it deployed on Hobby, the value in code is not what is in effect.
+- Check function **memory** — headless Chrome wants 1–2GB.
 
 Other open items, roughly by priority:
 
@@ -49,6 +55,6 @@ Other open items, roughly by priority:
 
 ## Suggested next steps
 
-1. Deploy the PR branch to Vercel and do one real end-to-end render with logs open — this is the only way to close out the largest unknown.
+1. Redeploy to pick up the typing fix, then click **Generate MP4** once with function logs open — that closes out the largest remaining unknown.
 2. Add auth or rate limiting to `/api/render` before sharing any deployed URL.
 3. Decide the icon-rail overlap question — it's a product call, not a technical one.

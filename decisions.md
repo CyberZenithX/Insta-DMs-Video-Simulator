@@ -12,6 +12,23 @@ No timers, no effects driving animation, no randomness anywhere in the render pa
 
 A `typing` event and the `them` message following it collapse into a single slot with two phases. The alternative — a typing bubble that unmounts and a message bubble that mounts — makes the stack grow then shrink, which reads as a visible jolt. As phases, the bubble resizes and crossfades in place.
 
+### A typing event has no independent lifetime — pair it or drop it
+
+This follows directly from the above, and it is the rule that keeps the stack correct. **A typing event is only ever a preamble to a message bubble's entrance.** Nothing else retires it: a slot whose only phase is `typing` stays visible for every subsequent frame, and `durationSec` is not read by `buildSlots` at all. So a typing event that cannot be paired with a following `them` message must produce **no slot at all**. Rendering it "just in case" strands a dots bubble in the stack permanently.
+
+Pairing is resolved by **lookahead** — for each typing event, find the next message event and keep the pairing only if that message is from `them`. It must not be done with a mutable "pending typing" pointer. That was the original implementation and it shipped two distinct visible bugs, because the pointer was only cleared on the `them` branch:
+
+- **Stranded dots.** Next message from `me` → merge branch skipped → pointer never cleared → the typing slot never received its message phase and its bubble sat among older messages for the rest of the video. `buildEventsFromScript` emitted a typing beat before *every* message, so a normal 4-message script stranded two; `demoEvents` stranded three.
+- **Out-of-order messages.** The stale pointer stayed live, so a much later `them` message merged into a typing slot from earlier in the array and rendered at the wrong stack position. In `demoEvents` this put "the notification bug thing" (t=3.6) above "seen what 👀" (t=2.3).
+
+The lookahead rule also covers, with no extra code, a dangling typing event with nothing after it and the earlier of two consecutive typing events. Slots are sorted by first-phase frame so stack order is order of appearance, not order of message time — a merged slot enters the stack when its *typing* phase starts.
+
+### You never see your own typing indicator
+
+Real Instagram doesn't show you your own typing bubble in your own chat, so a `me` typing beat is **pacing only**: it advances the timeline without drawing anything. The typing event schema carries an optional `from` (default `'them'`) to make that explicit rather than inferred.
+
+`buildEventsFromScript` still *spends* the same beat before a `me` message — you were composing it — so removing the bubble left pacing byte-for-byte unchanged. Don't "fix" the asymmetry by emitting `me` typing bubbles again; that is the bug above.
+
 ### One spring drives both the bubble and the scroll
 
 The newest bubble's entrance/resize and the scroll retarget are interpolated by the same spring value. Two independently-timed animations, however carefully tuned, drift apart and read as two separate events. `computeFrameLayout` computes the stack's cumulative bottom both before and after the current event and lerps between the two scroll targets with that one value.
@@ -84,7 +101,9 @@ Worth knowing: **Vercel is not Remotion's recommended cloud render target** — 
 
 Each of these is a real failure that was hit and diagnosed:
 
-1. **`defaultProps.ts` hardcodes `'/avatar-demo.svg'` instead of calling `staticFile()`.** Anything the API route imports must not pull in the `remotion` React barrel — the Next server build dies with `React.createContext is undefined`. `staticFile()` resolves to exactly that path outside a browser context anyway.
+1. **`defaultProps.ts` stores the avatar as a plain root path instead of calling `staticFile()`.** Anything the API route imports must not pull in the `remotion` React barrel — the Next server build dies with `React.createContext is undefined`.
+
+   The asset path then differs by context, and all three must keep working: the Next `<Player>` preview and `/api/render` (whose bundle has `public/` flattened into it) both serve `public/` at root, so `/avatar-demo.svg` is right for them; **Studio and the `remotion` CLI set `window.remotion_staticBase` and need `staticFile()`**, which returns a prefixed path. `Root.tsx` is the Studio/CLI entry point and may import the barrel, so it applies `staticFile()` there. An earlier version hardcoded the bare path everywhere on the incorrect assumption that `staticFile()` resolves to it — the deployed site was fine, but Studio and CLI renders showed a broken avatar.
 2. **`serverComponentsExternalPackages`** for `@remotion/renderer` and `@sparticuz/chromium`. Webpack bundling mangles their CDP/websocket layer — the symptom was a cryptic `t.mask is not a function` at render time.
 3. **The `public/` flatten in `bundle-remotion.mjs`.** `bundle()` writes assets under `<outDir>/public/`, but a local-directory `serveUrl` is served verbatim from root, while `staticFile()` returns unprefixed paths. Mismatch means every asset 404s mid-render. Copying `public/` up to the bundle root satisfies both.
 4. **`outputFileTracingIncludes`.** The bundle is read via `fs` at runtime, not imported, so Next's tracer can't discover it and Vercel prunes it from the deployed function.
