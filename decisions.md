@@ -97,7 +97,7 @@ Worth knowing: **Vercel is not Remotion's recommended cloud render target** — 
 
 `src/lib/scriptToEvents.ts` is called by both the live preview and the render route. Two implementations of "how long is the typing beat" would drift, and the preview silently lying about the output is the worst possible failure for this tool.
 
-### Four fixes that look like cruft but aren't
+### Five fixes that look like cruft but aren't
 
 Each of these is a real failure that was hit and diagnosed:
 
@@ -107,6 +107,12 @@ Each of these is a real failure that was hit and diagnosed:
 2. **`serverComponentsExternalPackages`** for `@remotion/renderer` and `@sparticuz/chromium`. Webpack bundling mangles their CDP/websocket layer — the symptom was a cryptic `t.mask is not a function` at render time.
 3. **The `public/` flatten in `bundle-remotion.mjs`.** `bundle()` writes assets under `<outDir>/public/`, but a local-directory `serveUrl` is served verbatim from root, while `staticFile()` returns unprefixed paths. Mismatch means every asset 404s mid-render. Copying `public/` up to the bundle root satisfies both.
 4. **`outputFileTracingIncludes`.** The bundle is read via `fs` at runtime, not imported, so Next's tracer can't discover it and Vercel prunes it from the deployed function.
+
+   The same include also carries **Remotion's compositor** — the native Rust binary plus ffmpeg/ffprobe and ~22MB of `libav*.so` that do the actual frame extraction and encoding. `@remotion/compositor-linux-x64-gnu/index.js` is literally `exports.dir = __dirname`: the renderer requires the package only to learn a directory, then reads the executables from that path. So the tracer follows the require, keeps the 25-byte shim, prunes every binary, and the deployed function fails at render time with `ENOENT: ... /compositor-linux-x64-gnu/remotion`. Only the **gnu** build is included — Vercel's Node runtime is glibc x64, and the musl build would add ~24MB to a function that already carries Chromium.
+
+5. **`outputFileTracingExcludes` drops `node_modules/.remotion/`.** Rendering locally makes Remotion download its own Chrome Headless Shell into that directory — 122 files, ~243MB. Vercel doesn't use it (the browser there is `@sparticuz/chromium`), and shipping both would take the function from ~94MB to ~337MB, well past Vercel's 250MB uncompressed limit. A Vercel build doesn't normally trigger the download, so this is belt-and-braces — but the failure mode it prevents is a deploy that breaks only after someone happens to render locally before pushing, which is a miserable thing to debug.
+
+   Worth knowing the limit is real and the headroom is not huge: Chromium (~61MB) plus the compositor (~23MB) is most of the ~94MB budget already.
 
 ### Remotion pinned at 4.0.290 despite known CVEs
 
