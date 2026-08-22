@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D500C3"/>
+      <stop offset="100%" stop-color="#5A50FB"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="100" fill="url(#g)"/>
+  <text x="100" y="128" font-family="Arial, sans-serif" font-size="90" font-weight="700"
+    text-anchor="middle" fill="#FFFFFF">J</text>
+</svg>
