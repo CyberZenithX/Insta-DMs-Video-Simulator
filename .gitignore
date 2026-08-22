@@ -2,3 +2,11 @@ node_modules
 out
 .DS_Store
 *.log
+
+# Next.js
+.next
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# Pre-bundled Remotion project, built by `npm run bundle:remotion`
+remotion-bundle

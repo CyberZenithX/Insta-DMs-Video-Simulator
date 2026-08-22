@@ -1,18 +1,11 @@
 import React from 'react';
-import {Composition, staticFile} from 'remotion';
+import {Composition} from 'remotion';
 import {IgDmReel, calculateIgDmReelMetadata} from './compositions/IgDmReel';
 import {SafeZoneGrid} from './compositions/SafeZoneGrid';
 import {igDmReelPropsSchema, safeZoneGridPropsSchema} from './types';
 import {demoEvents} from './data/demoEvents';
+import {baseIgDmReelProps, defaultReceiver, defaultClock, defaultSafeZones} from './data/defaultProps';
 import {FPS, WIDTH, HEIGHT} from './constants';
-
-const defaultSafeZones = {
-	topEnd: 0.06,
-	railX: 0.79,
-	railTop: 0.38,
-	railBottom: 0.96,
-	bottomStart: 0.82,
-};
 
 export const RemotionRoot: React.FC = () => {
 	return (
@@ -27,20 +20,11 @@ export const RemotionRoot: React.FC = () => {
 				width={WIDTH}
 				height={HEIGHT}
 				defaultProps={{
+					...baseIgDmReelProps,
 					events: demoEvents,
-					receiver: {
-						name: 'Jordan',
-						username: '@jordan.codes',
-						avatar: staticFile('avatar-demo.svg'),
-						activeNow: true,
-					},
-					clock: '9:41',
-					background: {kind: 'solid', value: '#0B0B0F'},
+					receiver: defaultReceiver,
+					clock: defaultClock,
 					theme: 'none',
-					safeZones: defaultSafeZones,
-					scrollAnchor: 0.75,
-					spring: {damping: 20, mass: 0.6, stiffness: 180},
-					tailSec: 2.5,
 				}}
 			/>
 			<Composition

@@ -100,3 +100,20 @@ export const safeZoneGridPropsSchema = z.object({
 });
 
 export type SafeZoneGridProps = z.infer<typeof safeZoneGridPropsSchema>;
+
+/** Request body for POST /api/render — a simplified script, not the full IgDmReelProps. */
+export const scriptMessageSchema = z.object({
+	from: z.enum(['me', 'them']),
+	text: z.string().min(1).max(280),
+});
+
+export const generateRequestSchema = z.object({
+	theme: themeSchema,
+	receiverName: z.string().min(1).max(40),
+	receiverUsername: z.string().max(40).optional(),
+	clock: z.string().max(8).optional(),
+	messages: z.array(scriptMessageSchema).min(1).max(40),
+});
+
+export type ScriptMessageInput = z.infer<typeof scriptMessageSchema>;
+export type GenerateRequest = z.infer<typeof generateRequestSchema>;
