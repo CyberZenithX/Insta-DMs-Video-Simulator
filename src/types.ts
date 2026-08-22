@@ -12,6 +12,12 @@ export const messageEventSchema = z.object({
 export const typingEventSchema = z.object({
 	type: z.literal('typing'),
 	id: z.string(),
+	/**
+	 * Who is typing. Defaults to 'them'. A 'me' typing beat is pacing only —
+	 * it advances the timeline without drawing a bubble, because you never
+	 * see your own typing indicator in your own chat.
+	 */
+	from: z.enum(['me', 'them']).optional(),
 	durationSec: z.number().min(0),
 	startSec: z.number().min(0),
 });
