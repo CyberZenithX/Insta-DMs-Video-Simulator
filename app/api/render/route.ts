@@ -2,7 +2,7 @@ import {NextResponse} from 'next/server';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {renderMedia, selectComposition} from '@remotion/renderer';
+import {openBrowser, renderMedia, selectComposition} from '@remotion/renderer';
 import {baseIgDmReelProps, defaultClock, defaultReceiver} from '../../../src/data/defaultProps';
 import {buildEventsFromScript} from '../../../src/lib/scriptToEvents';
 import {generateRequestSchema, igDmReelPropsSchema} from '../../../src/types';
@@ -44,6 +44,19 @@ const getBrowserExecutable = async (): Promise<string | null> => {
 	const chromium = (await import('@sparticuz/chromium')).default;
 	return chromium.executablePath();
 };
+
+/**
+ * One line of NDJSON per event: {"type":"stage",...} | {"type":"progress",...}
+ * | {"type":"done",...} | {"type":"error",...}. The client reads the response
+ * body as a stream and renders a progress bar from it — a plain buffered
+ * fetch() has nothing to show until the whole render (which can run for tens
+ * of seconds) has already finished.
+ */
+type RenderEvent =
+	| {type: 'stage'; stage: 'launching' | 'resolving' | 'rendering' | 'stitching'; totalFrames?: number}
+	| {type: 'progress'; renderedFrames: number; encodedFrames: number; totalFrames: number; progress: number; estimatedRemainingMs: number}
+	| {type: 'done'; dataBase64: string}
+	| {type: 'error'; error: string};
 
 export async function POST(request: Request) {
 	if (!fs.existsSync(BUNDLE_DIR)) {
@@ -87,41 +100,76 @@ export async function POST(request: Request) {
 		`ig-dm-reel-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`,
 	);
 
-	try {
-		const browserExecutable = await getBrowserExecutable();
-		const chromiumOptions = browserExecutable ? ({gl: 'swangle'} as const) : undefined;
+	const stream = new ReadableStream<Uint8Array>({
+		async start(controller) {
+			const encoder = new TextEncoder();
+			const send = (event: RenderEvent) => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
 
-		const composition = await selectComposition({
-			serveUrl: BUNDLE_DIR,
-			id: 'IgDmReel',
-			inputProps,
-			browserExecutable,
-			chromiumOptions,
-		});
+			let browser: Awaited<ReturnType<typeof openBrowser>> | undefined;
+			try {
+				const browserExecutable = await getBrowserExecutable();
+				const chromiumOptions = browserExecutable ? ({gl: 'swangle'} as const) : undefined;
 
-		await renderMedia({
-			composition,
-			serveUrl: BUNDLE_DIR,
-			codec: 'h264',
-			outputLocation,
-			inputProps,
-			browserExecutable,
-			chromiumOptions,
-		});
+				send({type: 'stage', stage: 'launching'});
+				// Opened once and reused for both calls below — selectComposition
+				// and renderMedia each launch their own browser by default, and a
+				// cold headless-Chrome launch is a meaningful fraction of total
+				// render time on a fresh serverless invocation.
+				browser = await openBrowser('chrome', {browserExecutable, chromiumOptions});
 
-		const videoBuffer = fs.readFileSync(outputLocation);
-		return new NextResponse(new Uint8Array(videoBuffer), {
-			status: 200,
-			headers: {
-				'Content-Type': 'video/mp4',
-				'Content-Disposition': 'attachment; filename="ig-dm-reel.mp4"',
-				'Content-Length': String(videoBuffer.length),
-			},
-		});
-	} catch (err) {
-		console.error('Render failed', err);
-		return NextResponse.json({error: err instanceof Error ? err.message : 'Render failed.'}, {status: 500});
-	} finally {
-		fs.rm(outputLocation, {force: true}, () => {});
-	}
+				send({type: 'stage', stage: 'resolving'});
+				const composition = await selectComposition({
+					serveUrl: BUNDLE_DIR,
+					id: 'IgDmReel',
+					inputProps,
+					puppeteerInstance: browser,
+					browserExecutable,
+					chromiumOptions,
+				});
+
+				send({type: 'stage', stage: 'rendering', totalFrames: composition.durationInFrames});
+				await renderMedia({
+					composition,
+					serveUrl: BUNDLE_DIR,
+					codec: 'h264',
+					outputLocation,
+					inputProps,
+					puppeteerInstance: browser,
+					browserExecutable,
+					chromiumOptions,
+					onProgress: (p) => {
+						send({
+							type: 'progress',
+							renderedFrames: p.renderedFrames,
+							encodedFrames: p.encodedFrames,
+							totalFrames: composition.durationInFrames,
+							progress: p.progress,
+							estimatedRemainingMs: p.renderEstimatedTime,
+						});
+						if (p.stitchStage === 'muxing') {
+							send({type: 'stage', stage: 'stitching'});
+						}
+					},
+				});
+
+				const videoBuffer = fs.readFileSync(outputLocation);
+				send({type: 'done', dataBase64: videoBuffer.toString('base64')});
+			} catch (err) {
+				console.error('Render failed', err);
+				send({type: 'error', error: err instanceof Error ? err.message : 'Render failed.'});
+			} finally {
+				await browser?.close({silent: true}).catch(() => {});
+				fs.rm(outputLocation, {force: true}, () => {});
+				controller.close();
+			}
+		},
+	});
+
+	return new NextResponse(stream, {
+		status: 200,
+		headers: {
+			'Content-Type': 'application/x-ndjson; charset=utf-8',
+			'Cache-Control': 'no-store',
+		},
+	});
 }

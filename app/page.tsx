@@ -12,6 +12,36 @@ import type {IgDmReelProps} from '../src/types';
 
 type ScriptMessage = {id: string; from: 'me' | 'them'; text: string};
 
+type RenderStage = 'launching' | 'resolving' | 'rendering' | 'stitching' | 'done';
+
+type RenderEvent =
+	| {type: 'stage'; stage: RenderStage; totalFrames?: number}
+	| {
+			type: 'progress';
+			renderedFrames: number;
+			encodedFrames: number;
+			totalFrames: number;
+			progress: number;
+			estimatedRemainingMs: number;
+	  }
+	| {type: 'done'; dataBase64: string}
+	| {type: 'error'; error: string};
+
+const STAGE_LABEL: Record<RenderStage, string> = {
+	launching: 'Starting renderer…',
+	resolving: 'Preparing composition…',
+	rendering: 'Rendering frames…',
+	stitching: 'Encoding video…',
+	done: 'Done',
+};
+
+const base64ToBlob = (base64: string, mimeType: string): Blob => {
+	const binary = atob(base64);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+	return new Blob([bytes], {type: mimeType});
+};
+
 const THEME_OPTIONS: {value: ThemeName; label: string}[] = [
 	{value: 'none', label: 'None (classic black)'},
 	{value: 'default', label: 'Default'},
@@ -43,6 +73,10 @@ export default function Page() {
 	const [messages, setMessages] = useState<ScriptMessage[]>(INITIAL_MESSAGES);
 	const [generating, setGenerating] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [renderStage, setRenderStage] = useState<RenderStage | null>(null);
+	const [renderProgress, setRenderProgress] = useState(0);
+	const [renderFrames, setRenderFrames] = useState<{done: number; total: number} | null>(null);
+	const [etaMs, setEtaMs] = useState<number | null>(null);
 
 	const events = useMemo(
 		() => buildEventsFromScript(messages.map(({from, text}) => ({from, text}))),
@@ -93,6 +127,11 @@ export default function Page() {
 		}
 
 		setGenerating(true);
+		setRenderStage('launching');
+		setRenderProgress(0);
+		setRenderFrames(null);
+		setEtaMs(null);
+
 		try {
 			const res = await fetch('/api/render', {
 				method: 'POST',
@@ -110,16 +149,58 @@ export default function Page() {
 				const body = await res.json().catch(() => null);
 				throw new Error(body?.error || `Render failed (${res.status}).`);
 			}
+			if (!res.body) {
+				throw new Error('No response body from the server.');
+			}
 
-			const blob = await res.blob();
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = 'ig-dm-reel.mp4';
-			document.body.appendChild(a);
-			a.click();
-			a.remove();
-			URL.revokeObjectURL(url);
+			// The server streams newline-delimited JSON progress events, ending
+			// with either a `done` event carrying the base64 video or an `error`
+			// event — a plain buffered response has nothing to show until a
+			// render that can take tens of seconds has already finished.
+			const reader = res.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = '';
+			let finished = false;
+
+			while (!finished) {
+				const {done, value} = await reader.read();
+				if (done) break;
+				buffer += decoder.decode(value, {stream: true});
+
+				while (buffer.includes('\n')) {
+					const newlineIndex = buffer.indexOf('\n');
+					const line = buffer.slice(0, newlineIndex);
+					buffer = buffer.slice(newlineIndex + 1);
+					if (!line.trim()) continue;
+
+					const event = JSON.parse(line) as RenderEvent;
+
+					if (event.type === 'stage') {
+						setRenderStage(event.stage);
+						if (event.totalFrames) setRenderFrames({done: 0, total: event.totalFrames});
+					} else if (event.type === 'progress') {
+						setRenderStage('rendering');
+						setRenderProgress(event.progress);
+						setRenderFrames({done: event.renderedFrames, total: event.totalFrames});
+						setEtaMs(event.estimatedRemainingMs);
+					} else if (event.type === 'done') {
+						setRenderStage('done');
+						setRenderProgress(1);
+						const blob = base64ToBlob(event.dataBase64, 'video/mp4');
+						const url = URL.createObjectURL(blob);
+						const a = document.createElement('a');
+						a.href = url;
+						a.download = 'ig-dm-reel.mp4';
+						document.body.appendChild(a);
+						a.click();
+						a.remove();
+						URL.revokeObjectURL(url);
+						finished = true;
+					} else if (event.type === 'error') {
+						throw new Error(event.error);
+					}
+				}
+			}
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Something went wrong.');
 		} finally {
@@ -214,8 +295,40 @@ export default function Page() {
 				</div>
 
 				<button onClick={generate} disabled={generating} style={generateButtonStyle}>
-					{generating ? 'Rendering… this can take a minute' : 'Generate MP4'}
+					{generating ? 'Rendering…' : 'Generate MP4'}
 				</button>
+
+				{generating && (
+					<div style={{marginTop: 12}}>
+						<div style={{display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#a8a8a8'}}>
+							<span>{renderStage ? STAGE_LABEL[renderStage] : ''}</span>
+							<span>
+								{renderFrames ? `${renderFrames.done}/${renderFrames.total} frames · ` : ''}
+								{Math.round(renderProgress * 100)}%
+								{etaMs !== null && etaMs > 300 ? ` · ~${Math.ceil(etaMs / 1000)}s left` : ''}
+							</span>
+						</div>
+						<div
+							style={{
+								marginTop: 6,
+								height: 8,
+								borderRadius: 999,
+								background: '#1c1c22',
+								overflow: 'hidden',
+							}}
+						>
+							<div
+								style={{
+									height: '100%',
+									width: `${Math.round(renderProgress * 100)}%`,
+									background: 'linear-gradient(90deg, #d500c3, #7f31f6, #5a50fb)',
+									transition: 'width 200ms ease-out',
+								}}
+							/>
+						</div>
+					</div>
+				)}
+
 				{error && <p style={{color: '#ff6b6b', fontSize: 13, marginTop: 8}}>{error}</p>}
 			</section>
 
