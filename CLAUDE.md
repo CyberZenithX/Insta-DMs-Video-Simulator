@@ -72,14 +72,15 @@ One master gradient is sampled per-bubble by that bubble's *live viewport positi
 
 The system emoji font is bypassed. `src/emoji/parse.ts` tokenizes emoji out of message text and maps each to a Noto Color Emoji filename by codepoint (`👀` → `emoji_u1f440.png`), served from `public/emoji/`. **Adding an emoji to a script requires adding the matching PNG** — otherwise it 404s mid-render and the render fails. Only a handful are currently vendored.
 
-### Next.js layer — four load-bearing gotchas
+### Next.js layer — five load-bearing gotchas
 
 These are all fixes for real failures; changing them will break the build or the render:
 
 1. **Anything imported by `app/api/render/route.ts` must not import the `remotion` React barrel.** That's why `src/data/defaultProps.ts` hardcodes `'/avatar-demo.svg'` instead of calling `staticFile()`. Violating this fails the Next server build with `React.createContext is undefined`.
 2. **`serverComponentsExternalPackages`** (`next.config.js`) keeps `@remotion/renderer` and `@sparticuz/chromium` out of webpack — bundling mangles their CDP/websocket and native code.
 3. **`scripts/bundle-remotion.mjs` flattens `public/` into the bundle root.** `bundle()` nests assets under `public/`, but a local-directory `serveUrl` is served verbatim at root while `staticFile()` returns unprefixed paths. Without the flatten, every asset 404s at render time.
-4. **`outputFileTracingIncludes`** keeps Vercel from pruning `remotion-bundle/` out of the deployed function.
+4. **`outputFileTracingIncludes`** keeps Vercel from pruning two things out of the deployed function: `remotion-bundle/`, and Remotion's **compositor binaries**. The compositor package's `index.js` is only `exports.dir = __dirname` — the renderer requires it to get a directory, then reads `remotion`, `ffmpeg`, and ~22MB of `libav*.so` from that path at runtime. The tracer keeps the JS shim and prunes every binary, and the function dies with `ENOENT ... /compositor-linux-x64-gnu/remotion`.
+5. **`outputFileTracingExcludes` drops `node_modules/.remotion/`.** Rendering locally makes Remotion download its own Chrome Headless Shell there (~243MB). On Vercel the browser is `@sparticuz/chromium`, so that copy is dead weight and would push the function past Vercel's 250MB limit. Keep the deployed function around ~94MB.
 
 Browser selection is environment-sensitive: locally Remotion uses its own managed Chrome; when `VERCEL`/`AWS_LAMBDA_FUNCTION_NAME` is set it falls back to `@sparticuz/chromium`.
 

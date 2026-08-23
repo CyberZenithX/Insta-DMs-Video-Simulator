@@ -69,6 +69,12 @@ The composition now fills the whole canvas like a real screen recording. **`safe
 
 Right-aligned sent bubbles now occupy roughly the same region as Instagram's icon rail. This is a genuine tension with no clean answer: bubbles hard against the right edge is what the real reference screenshot shows, but that's also exactly where the rail floats. Left as-is (favoring authenticity) and flagged rather than silently traded away. `SafeZoneGrid` visualizes the overlap.
 
+### A side effect nobody has hit yet: `background` is currently inert
+
+`<Background background={background} />` renders first in `IgDmReel`, correctly, for all four `kind`s. But `<PhoneFrame>` renders immediately after it — full-bleed as of this fix, and opaque (`colors.chatBackground` for `theme: 'none'`, a theme gradient otherwise) — so it paints over the entire canvas on every frame. `background`'s pixels are never visible, in any configuration, including `kind: 'solid'` with `theme: 'none'`: `chatBackground` is a hardcoded token, not `background.value`, so even that "trivial" case doesn't pass through.
+
+This was true the moment full-bleed shipped and nobody has needed to touch `background` since, so it's undiscovered rather than accepted. Not fixed here because the right fix isn't obvious: either `PhoneFrame`'s classic-mode fill should defer to `background.value` instead of the hardcoded token, or `background` should be retired as a prop now that `theme` covers the real use case. Whoever picks this up should decide which, not silently wire one in.
+
 ## Themes
 
 ### Sampled, not eyeballed
@@ -97,7 +103,7 @@ Worth knowing: **Vercel is not Remotion's recommended cloud render target** — 
 
 `src/lib/scriptToEvents.ts` is called by both the live preview and the render route. Two implementations of "how long is the typing beat" would drift, and the preview silently lying about the output is the worst possible failure for this tool.
 
-### Four fixes that look like cruft but aren't
+### Six fixes that look like cruft but aren't
 
 Each of these is a real failure that was hit and diagnosed:
 
@@ -107,6 +113,18 @@ Each of these is a real failure that was hit and diagnosed:
 2. **`serverComponentsExternalPackages`** for `@remotion/renderer` and `@sparticuz/chromium`. Webpack bundling mangles their CDP/websocket layer — the symptom was a cryptic `t.mask is not a function` at render time.
 3. **The `public/` flatten in `bundle-remotion.mjs`.** `bundle()` writes assets under `<outDir>/public/`, but a local-directory `serveUrl` is served verbatim from root, while `staticFile()` returns unprefixed paths. Mismatch means every asset 404s mid-render. Copying `public/` up to the bundle root satisfies both.
 4. **`outputFileTracingIncludes`.** The bundle is read via `fs` at runtime, not imported, so Next's tracer can't discover it and Vercel prunes it from the deployed function.
+
+   The same include also carries **Remotion's compositor** — the native Rust binary plus ffmpeg/ffprobe and ~22MB of `libav*.so` that do the actual frame extraction and encoding. `@remotion/compositor-linux-x64-gnu/index.js` is literally `exports.dir = __dirname`: the renderer requires the package only to learn a directory, then reads the executables from that path. So the tracer follows the require, keeps the 25-byte shim, prunes every binary, and the deployed function fails at render time with `ENOENT: ... /compositor-linux-x64-gnu/remotion`. Only the **gnu** build is included — Vercel's Node runtime is glibc x64, and the musl build would add ~24MB to a function that already carries Chromium.
+
+5. **`getBrowserExecutable` sets `AWS_LAMBDA_JS_RUNTIME` itself before importing `@sparticuz/chromium`.** Surfaced by a live-site render failing with a bare `Failed to launch the browser process! ... Closed with 127 signal: null` — no filename, no missing-library name, nothing actionable in the message itself.
+
+   `@sparticuz/chromium`'s own module-load code decides whether it's inside a Lambda-like sandbox by checking `AWS_EXECUTION_ENV` / `AWS_LAMBDA_JS_RUNTIME` (`build/helper.js`), and only if one of those is set does it extract its bundled glibc-compat shared libraries (`libnss3.so`, `libnspr4.so`, and the rest of `al2023.tar.br`) and point `LD_LIBRARY_PATH` at them (`build/index.js`, top-level, and again inside `executablePath()`). Vercel's Node runtime never sets either var, even though it *is* a Lambda-like sandbox — confirmed by reproducing it locally: importing the package with those env vars unset extracts `chromium` itself but never touches `/tmp/al2023/lib`, so the binary exists but its dynamic loader can't resolve its own dependencies. That's exactly what "closed with signal 127 and no other detail" looks like from Node's side — the child process never gets far enough to say what's missing.
+
+   The package's own README points at exactly this pattern for Netlify (a similarly non-native Lambda serverless host): the integrator sets the env var itself so the package's existing Lambda-detection logic runs as designed, rather than the package trying to guess. `getBrowserExecutable` does the same — sets `AWS_LAMBDA_JS_RUNTIME` (keyed off `process.versions.node`'s major version, not a guess at which Vercel image is live) before the dynamic `import('@sparticuz/chromium')`, since the check that matters runs at module-load time. Verified by reproducing the before/after directly against the installed package: unset, `LD_LIBRARY_PATH` never gets set and `/tmp/al2023/lib` never gets created; with the var forced, both happen and the extracted directory contains `libnss3.so` et al. **Not yet confirmed against an actual Vercel redeploy** — see `progress.md`.
+
+6. **`outputFileTracingExcludes` drops `node_modules/.remotion/`.** Rendering locally makes Remotion download its own Chrome Headless Shell into that directory — 122 files, ~243MB. Vercel doesn't use it (the browser there is `@sparticuz/chromium`), and shipping both would take the function from ~94MB to ~337MB, well past Vercel's 250MB uncompressed limit. A Vercel build doesn't normally trigger the download, so this is belt-and-braces — but the failure mode it prevents is a deploy that breaks only after someone happens to render locally before pushing, which is a miserable thing to debug.
+
+   Worth knowing the limit is real and the headroom is not huge: Chromium (~61MB) plus the compositor (~23MB) is most of the ~94MB budget already.
 
 ### Remotion pinned at 4.0.290 despite known CVEs
 
@@ -119,3 +137,9 @@ Each of these is a real failure that was hit and diagnosed:
 The repo had **zero branches** when this work started, so the feature branch became the de facto default and there was nothing to open a PR against.
 
 First attempt created `main` as a true empty orphan branch; GitHub rejected the PR outright — no shared history. Fixed by resetting `main` to the feature branch's root commit (`be48984`, the reference images) and force-pushing, so the two share ancestry. Safe in this specific case because `main` was seconds old and nothing else could have been based on it. **Not** a pattern to repeat on a branch anyone else might have pulled.
+
+### The branch keeps getting reused after its PR merges — check before pushing
+
+This has happened twice: PR #1 merged, then a docs commit (`a124720`) got pushed straight onto the now-merged branch. PR #2 merged, then a fix commit (`30af321`, the compositor binaries) got pushed the same way. Both times the new commit was real, wanted work — just landed on stale history with no PR watching it.
+
+Both were resolved the same way: `git rebase origin/main`, force-push (safe — the only unmerged content is the commit being rebased, and nothing else can be based on a branch this short-lived), open a new PR. Before pushing to `claude/references-instagram-screenshots-d36atz` for *any* reason, check whether its last PR already merged (`gh pr list --state merged` or the equivalent API call). If it has, rebase onto current `main` first — don't push onto the stale head and assume the next PR will sort itself out.

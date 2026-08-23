@@ -99,7 +99,7 @@ export default function Page() {
 				headers: {'Content-Type': 'application/json'},
 				body: JSON.stringify({
 					theme,
-					receiverName,
+					receiverName: receiverName.trim() || defaultReceiver.name,
 					receiverUsername,
 					clock,
 					messages: messages.map(({from, text}) => ({from, text})),
@@ -157,19 +157,25 @@ export default function Page() {
 				<div style={{display: 'flex', gap: 12}}>
 					<label style={{...labelStyle, flex: 1}}>
 						Receiver name
-						<input value={receiverName} onChange={(e) => setReceiverName(e.target.value)} style={fullWidth} />
+						<input
+							value={receiverName}
+							onChange={(e) => setReceiverName(e.target.value)}
+							maxLength={40}
+							style={fullWidth}
+						/>
 					</label>
 					<label style={{...labelStyle, flex: 1}}>
 						Username
 						<input
 							value={receiverUsername}
 							onChange={(e) => setReceiverUsername(e.target.value)}
+							maxLength={40}
 							style={fullWidth}
 						/>
 					</label>
 					<label style={{...labelStyle, width: 90}}>
 						Clock
-						<input value={clock} onChange={(e) => setClock(e.target.value)} style={fullWidth} />
+						<input value={clock} onChange={(e) => setClock(e.target.value)} maxLength={8} style={fullWidth} />
 					</label>
 				</div>
 
