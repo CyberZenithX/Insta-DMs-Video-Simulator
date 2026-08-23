@@ -126,6 +126,25 @@ Each of these is a real failure that was hit and diagnosed:
 
    Worth knowing the limit is real and the headroom is not huge: Chromium (~61MB) plus the compositor (~23MB) is most of the ~94MB budget already.
 
+### Render progress is a raw NDJSON stream, not SSE or a polling endpoint
+
+The render UI needed a real progress bar — the previous "Rendering… this can take a minute" gave no sense of how long a tens-of-seconds wait would actually be. `RenderMediaOnProgress` already gives everything needed (`renderedFrames`, `progress`, `renderEstimatedTime`); the only question was how to get it from a single server request/response into the browser.
+
+Two more conventional options were passed over:
+
+- **A separate job-status endpoint** (`POST` to start, `GET` to poll progress, `GET` to fetch the result) needs server-side job state to survive between requests. Vercel serverless functions don't share memory across invocations, so this would need external storage (KV, a database) purely to hold progress for the duration of one render — real infrastructure for a problem that doesn't need it.
+- **Server-Sent Events** are the standard tool for one-way server→client progress, but the payload here ends in one large binary (the MP4) that has to reach the client anyway, on the *same* request that reported progress on it — otherwise you're back to a second request and the job-state problem above.
+
+Instead, `/api/render` returns one chunked HTTP response, streamed as newline-delimited JSON: stage/progress events as they happen, then the finished MP4 as a final base64-encoded line. `app/page.tsx` reads `res.body.getReader()` and buffers to newlines. This needs no server-side state at all — the entire "job" lives in the lifetime of one HTTP request — and needs no new infrastructure. The 400-validation path is untouched: invalid requests are still rejected before the stream ever opens, so they stay a plain synchronous JSON error.
+
+The one thing this couldn't be verified against is Vercel's edge/CDN layer actually forwarding a chunked response promptly rather than buffering it — that's real infrastructure behavior, not application logic, and this sandbox can't reach `vercel.app` to check. If the progress bar doesn't move on the live site despite the browser launching and the render completing, that's the first thing to check — not the streaming code itself.
+
+### Speed: only the redundant browser launch was touched
+
+`selectComposition` and `renderMedia` each open their own headless browser by default — one call was doing two full Chrome launches for one render. Sharing a single instance via `openBrowser()` + `puppeteerInstance` removes one of them. This is safe to make unilaterally: it's strictly less work for identical output, not a quality/resource tradeoff.
+
+`concurrency` (parallel rendering pages) and `jpegQuality` (per-frame JPEG encode quality) are the other two real levers, and both were deliberately left at Remotion's defaults. Both are tradeoffs, not pure wins: pushing `concurrency` up speeds rendering only if there's spare CPU/memory to do it with, and guessing wrong risks OOM-killing the function outright — worse than slow — on a memory budget (see the ~94MB *function size* budget above, which is a different constraint from the runtime memory `concurrency` would actually compete for, but the same theme: Vercel's limits are real and can't be tuned against blind). Lowering `jpegQuality` trades visible output quality for speed, which is a decision for whoever's actually watching the rendered video, not a default to silently change. Neither could be verified against real Vercel resource limits from this sandbox — tune these live, watching actual function memory/duration, not by guessing a number and hoping.
+
 ### Remotion pinned at 4.0.290 despite known CVEs
 
 `extract-zip`, `webpack`, and `ws` carry advisories that only clear by bumping the whole Remotion toolchain to 4.0.515+. Left pinned to avoid destabilizing a render pipeline that had just been debugged into working. These are build/dev-time code paths, not exposed to arbitrary attacker input. Revisit deliberately, with time to re-verify renders afterward — not as a drive-by upgrade.

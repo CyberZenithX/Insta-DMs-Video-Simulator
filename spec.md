@@ -71,9 +71,18 @@ Server behavior:
 1. Validate the body against `generateRequestSchema`. Fails closed with `400` and the first Zod issue message on any violation — nothing renders on invalid input.
 2. Turn `messages` into a full `TimelineEvent[]` via `buildEventsFromScript()` (`src/lib/scriptToEvents.ts`) — the same function the live preview uses, so preview and output can't drift. A `'them'` message gets a preceding typing beat (1.2s, +0.15s gap); a `'me'` message spends an equivalent beat but draws no bubble (see the `typing` constraint above). Read pause after each message: `min(1.6, 0.5 + 0.02 × text.length)` seconds.
 3. Merge with `baseIgDmReelProps` + `defaultReceiver` (name/username overridden from the request), validate the assembled object against `igDmReelPropsSchema`.
-4. `selectComposition` + `renderMedia` against the pre-built bundle at `remotion-bundle/` (must exist — built by `npm run bundle:remotion`, part of `npm run build`). Browser: `@sparticuz/chromium` when `VERCEL` or `AWS_LAMBDA_FUNCTION_NAME` is set, otherwise Remotion's own local browser.
+4. One headless browser is opened (`openBrowser()`) and shared between `selectComposition` and `renderMedia` against the pre-built bundle at `remotion-bundle/` (must exist — built by `npm run bundle:remotion`, part of `npm run build`). Browser binary: `@sparticuz/chromium` when `VERCEL` or `AWS_LAMBDA_FUNCTION_NAME` is set, otherwise Remotion's own local browser.
 
-Response: `200` with `Content-Type: video/mp4`, `Content-Disposition: attachment; filename="ig-dm-reel.mp4"`, raw MP4 bytes. `500` with `{error: string}` on any render failure (bundle missing, browser launch failure, encode failure, etc.).
+Response on a valid request: `200`, `Content-Type: application/x-ndjson`, a **streamed**, newline-delimited sequence of JSON events (not one buffered response) — the client is expected to read `response.body` incrementally, not `await response.json()`/`.blob()`:
+
+```ts
+{type: 'stage'; stage: 'launching'|'resolving'|'rendering'|'stitching'; totalFrames?: number}
+{type: 'progress'; renderedFrames: number; encodedFrames: number; totalFrames: number; progress: number; estimatedRemainingMs: number}  // one per frame, forwarded from renderMedia's own onProgress
+{type: 'done'; dataBase64: string}   // the finished MP4, base64-encoded — the last line on success
+{type: 'error'; error: string}       // in place of 'done', if the render fails after streaming has started
+```
+
+A request that fails **validation** never reaches the stream at all: `400`/`500` with a plain synchronous `{error: string}` JSON body, same as before — bundle-directory missing is a `500` at this stage, invalid body shape is a `400`.
 
 No authentication. No rate limiting beyond the length caps above.
 
