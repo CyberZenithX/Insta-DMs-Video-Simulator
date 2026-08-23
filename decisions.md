@@ -69,6 +69,12 @@ The composition now fills the whole canvas like a real screen recording. **`safe
 
 Right-aligned sent bubbles now occupy roughly the same region as Instagram's icon rail. This is a genuine tension with no clean answer: bubbles hard against the right edge is what the real reference screenshot shows, but that's also exactly where the rail floats. Left as-is (favoring authenticity) and flagged rather than silently traded away. `SafeZoneGrid` visualizes the overlap.
 
+### A side effect nobody has hit yet: `background` is currently inert
+
+`<Background background={background} />` renders first in `IgDmReel`, correctly, for all four `kind`s. But `<PhoneFrame>` renders immediately after it — full-bleed as of this fix, and opaque (`colors.chatBackground` for `theme: 'none'`, a theme gradient otherwise) — so it paints over the entire canvas on every frame. `background`'s pixels are never visible, in any configuration, including `kind: 'solid'` with `theme: 'none'`: `chatBackground` is a hardcoded token, not `background.value`, so even that "trivial" case doesn't pass through.
+
+This was true the moment full-bleed shipped and nobody has needed to touch `background` since, so it's undiscovered rather than accepted. Not fixed here because the right fix isn't obvious: either `PhoneFrame`'s classic-mode fill should defer to `background.value` instead of the hardcoded token, or `background` should be retired as a prop now that `theme` covers the real use case. Whoever picks this up should decide which, not silently wire one in.
+
 ## Themes
 
 ### Sampled, not eyeballed
@@ -125,3 +131,9 @@ Each of these is a real failure that was hit and diagnosed:
 The repo had **zero branches** when this work started, so the feature branch became the de facto default and there was nothing to open a PR against.
 
 First attempt created `main` as a true empty orphan branch; GitHub rejected the PR outright — no shared history. Fixed by resetting `main` to the feature branch's root commit (`be48984`, the reference images) and force-pushing, so the two share ancestry. Safe in this specific case because `main` was seconds old and nothing else could have been based on it. **Not** a pattern to repeat on a branch anyone else might have pulled.
+
+### The branch keeps getting reused after its PR merges — check before pushing
+
+This has happened twice: PR #1 merged, then a docs commit (`a124720`) got pushed straight onto the now-merged branch. PR #2 merged, then a fix commit (`30af321`, the compositor binaries) got pushed the same way. Both times the new commit was real, wanted work — just landed on stale history with no PR watching it.
+
+Both were resolved the same way: `git rebase origin/main`, force-push (safe — the only unmerged content is the commit being rebased, and nothing else can be based on a branch this short-lived), open a new PR. Before pushing to `claude/references-instagram-screenshots-d36atz` for *any* reason, check whether its last PR already merged (`gh pr list --state merged` or the equivalent API call). If it has, rebase onto current `main` first — don't push onto the stale head and assume the next PR will sort itself out.
