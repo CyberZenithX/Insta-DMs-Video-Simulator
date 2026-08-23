@@ -103,7 +103,7 @@ Worth knowing: **Vercel is not Remotion's recommended cloud render target** — 
 
 `src/lib/scriptToEvents.ts` is called by both the live preview and the render route. Two implementations of "how long is the typing beat" would drift, and the preview silently lying about the output is the worst possible failure for this tool.
 
-### Five fixes that look like cruft but aren't
+### Six fixes that look like cruft but aren't
 
 Each of these is a real failure that was hit and diagnosed:
 
@@ -116,7 +116,13 @@ Each of these is a real failure that was hit and diagnosed:
 
    The same include also carries **Remotion's compositor** — the native Rust binary plus ffmpeg/ffprobe and ~22MB of `libav*.so` that do the actual frame extraction and encoding. `@remotion/compositor-linux-x64-gnu/index.js` is literally `exports.dir = __dirname`: the renderer requires the package only to learn a directory, then reads the executables from that path. So the tracer follows the require, keeps the 25-byte shim, prunes every binary, and the deployed function fails at render time with `ENOENT: ... /compositor-linux-x64-gnu/remotion`. Only the **gnu** build is included — Vercel's Node runtime is glibc x64, and the musl build would add ~24MB to a function that already carries Chromium.
 
-5. **`outputFileTracingExcludes` drops `node_modules/.remotion/`.** Rendering locally makes Remotion download its own Chrome Headless Shell into that directory — 122 files, ~243MB. Vercel doesn't use it (the browser there is `@sparticuz/chromium`), and shipping both would take the function from ~94MB to ~337MB, well past Vercel's 250MB uncompressed limit. A Vercel build doesn't normally trigger the download, so this is belt-and-braces — but the failure mode it prevents is a deploy that breaks only after someone happens to render locally before pushing, which is a miserable thing to debug.
+5. **`getBrowserExecutable` sets `AWS_LAMBDA_JS_RUNTIME` itself before importing `@sparticuz/chromium`.** Surfaced by a live-site render failing with a bare `Failed to launch the browser process! ... Closed with 127 signal: null` — no filename, no missing-library name, nothing actionable in the message itself.
+
+   `@sparticuz/chromium`'s own module-load code decides whether it's inside a Lambda-like sandbox by checking `AWS_EXECUTION_ENV` / `AWS_LAMBDA_JS_RUNTIME` (`build/helper.js`), and only if one of those is set does it extract its bundled glibc-compat shared libraries (`libnss3.so`, `libnspr4.so`, and the rest of `al2023.tar.br`) and point `LD_LIBRARY_PATH` at them (`build/index.js`, top-level, and again inside `executablePath()`). Vercel's Node runtime never sets either var, even though it *is* a Lambda-like sandbox — confirmed by reproducing it locally: importing the package with those env vars unset extracts `chromium` itself but never touches `/tmp/al2023/lib`, so the binary exists but its dynamic loader can't resolve its own dependencies. That's exactly what "closed with signal 127 and no other detail" looks like from Node's side — the child process never gets far enough to say what's missing.
+
+   The package's own README points at exactly this pattern for Netlify (a similarly non-native Lambda serverless host): the integrator sets the env var itself so the package's existing Lambda-detection logic runs as designed, rather than the package trying to guess. `getBrowserExecutable` does the same — sets `AWS_LAMBDA_JS_RUNTIME` (keyed off `process.versions.node`'s major version, not a guess at which Vercel image is live) before the dynamic `import('@sparticuz/chromium')`, since the check that matters runs at module-load time. Verified by reproducing the before/after directly against the installed package: unset, `LD_LIBRARY_PATH` never gets set and `/tmp/al2023/lib` never gets created; with the var forced, both happen and the extracted directory contains `libnss3.so` et al. **Not yet confirmed against an actual Vercel redeploy** — see `progress.md`.
+
+6. **`outputFileTracingExcludes` drops `node_modules/.remotion/`.** Rendering locally makes Remotion download its own Chrome Headless Shell into that directory — 122 files, ~243MB. Vercel doesn't use it (the browser there is `@sparticuz/chromium`), and shipping both would take the function from ~94MB to ~337MB, well past Vercel's 250MB uncompressed limit. A Vercel build doesn't normally trigger the download, so this is belt-and-braces — but the failure mode it prevents is a deploy that breaks only after someone happens to render locally before pushing, which is a miserable thing to debug.
 
    Worth knowing the limit is real and the headroom is not huge: Chromium (~61MB) plus the compositor (~23MB) is most of the ~94MB budget already.
 

@@ -24,6 +24,23 @@ const isServerlessSandbox = () => Boolean(process.env.VERCEL || process.env.AWS_
  */
 const getBrowserExecutable = async (): Promise<string | null> => {
 	if (!isServerlessSandbox()) return null;
+
+	// @sparticuz/chromium only unpacks its bundled glibc-compat shared
+	// libraries (nss, nspr, etc.) and points LD_LIBRARY_PATH at them when its
+	// own env-var check thinks it's running inside AWS Lambda (it looks for
+	// AWS_EXECUTION_ENV / AWS_LAMBDA_JS_RUNTIME, both checked at import time).
+	// Vercel's Node runtime never sets either, even though it's a Lambda-like
+	// sandbox, so that setup step silently gets skipped: the `chromium`
+	// binary is there, but its dynamic loader can't resolve its dependencies.
+	// Node reports that as a bare "Closed with 127 signal", not a helpful
+	// missing-library error. Setting the var ourselves before the module
+	// loads makes @sparticuz/chromium run its own intended setup, exactly as
+	// its own Netlify integration (a similarly non-Lambda serverless host)
+	// does. Node's own major version decides which of its two library sets
+	// applies, rather than guessing which Vercel image is in use.
+	const nodeMajor = Number(process.versions.node.split('.')[0]);
+	process.env.AWS_LAMBDA_JS_RUNTIME ??= nodeMajor >= 20 ? 'nodejs20.x' : 'nodejs18.x';
+
 	const chromium = (await import('@sparticuz/chromium')).default;
 	return chromium.executablePath();
 };
