@@ -42,6 +42,28 @@ const base64ToBlob = (base64: string, mimeType: string): Blob => {
 	return new Blob([bytes], {type: mimeType});
 };
 
+const downloadUrl = (url: string, filename: string) => {
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+};
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+type LambdaProgress = {
+	done: boolean;
+	overallProgress: number;
+	framesRendered: number;
+	fatalErrorEncountered: boolean;
+	errors: string[];
+	outputFile: string | null;
+};
+
+const POLL_INTERVAL_MS = 1500;
+
 const THEME_OPTIONS: {value: ThemeName; label: string}[] = [
 	{value: 'none', label: 'None (classic black)'},
 	{value: 'default', label: 'Default'},
@@ -149,55 +171,92 @@ export default function Page() {
 				const body = await res.json().catch(() => null);
 				throw new Error(body?.error || `Render failed (${res.status}).`);
 			}
-			if (!res.body) {
-				throw new Error('No response body from the server.');
-			}
 
-			// The server streams newline-delimited JSON progress events, ending
-			// with either a `done` event carrying the base64 video or an `error`
-			// event — a plain buffered response has nothing to show until a
-			// render that can take tens of seconds has already finished.
-			const reader = res.body.getReader();
-			const decoder = new TextDecoder();
-			let buffer = '';
-			let finished = false;
+			const contentType = res.headers.get('Content-Type') ?? '';
 
-			while (!finished) {
-				const {done, value} = await reader.read();
-				if (done) break;
-				buffer += decoder.decode(value, {stream: true});
+			if (contentType.includes('application/json')) {
+				// Remotion Lambda: this response is just "the render started" —
+				// the actual work happens on AWS, split across many short-lived
+				// Lambda invocations, not in this request. Poll for status instead
+				// of holding a connection open for however long the render takes.
+				const {renderId, bucketName} = (await res.json()) as {renderId: string; bucketName: string};
 
-				while (buffer.includes('\n')) {
-					const newlineIndex = buffer.indexOf('\n');
-					const line = buffer.slice(0, newlineIndex);
-					buffer = buffer.slice(newlineIndex + 1);
-					if (!line.trim()) continue;
+				for (;;) {
+					await sleep(POLL_INTERVAL_MS);
+					const progressRes = await fetch(
+						`/api/render/progress?renderId=${encodeURIComponent(renderId)}&bucketName=${encodeURIComponent(bucketName)}`,
+					);
+					if (!progressRes.ok) {
+						const body = await progressRes.json().catch(() => null);
+						throw new Error(body?.error || `Couldn't check render status (${progressRes.status}).`);
+					}
+					const progress = (await progressRes.json()) as LambdaProgress;
 
-					const event = JSON.parse(line) as RenderEvent;
+					if (progress.fatalErrorEncountered) {
+						throw new Error(progress.errors[0] || 'Render failed on the server.');
+					}
 
-					if (event.type === 'stage') {
-						setRenderStage(event.stage);
-						if (event.totalFrames) setRenderFrames({done: 0, total: event.totalFrames});
-					} else if (event.type === 'progress') {
-						setRenderStage('rendering');
-						setRenderProgress(event.progress);
-						setRenderFrames({done: event.renderedFrames, total: event.totalFrames});
-						setEtaMs(event.estimatedRemainingMs);
-					} else if (event.type === 'done') {
+					setRenderStage(progress.framesRendered > 0 ? 'rendering' : 'launching');
+					setRenderProgress(progress.overallProgress);
+					setRenderFrames({done: progress.framesRendered, total: 0});
+
+					if (progress.done) {
 						setRenderStage('done');
 						setRenderProgress(1);
-						const blob = base64ToBlob(event.dataBase64, 'video/mp4');
-						const url = URL.createObjectURL(blob);
-						const a = document.createElement('a');
-						a.href = url;
-						a.download = 'ig-dm-reel.mp4';
-						document.body.appendChild(a);
-						a.click();
-						a.remove();
-						URL.revokeObjectURL(url);
-						finished = true;
-					} else if (event.type === 'error') {
-						throw new Error(event.error);
+						if (!progress.outputFile) {
+							throw new Error('Render finished but no output file was returned.');
+						}
+						downloadUrl(progress.outputFile, 'ig-dm-reel.mp4');
+						break;
+					}
+				}
+			} else {
+				if (!res.body) {
+					throw new Error('No response body from the server.');
+				}
+
+				// The local-render fallback streams newline-delimited JSON progress
+				// events, ending with either a `done` event carrying the base64
+				// video or an `error` event — a plain buffered response has nothing
+				// to show until a render that can take tens of seconds has already
+				// finished.
+				const reader = res.body.getReader();
+				const decoder = new TextDecoder();
+				let buffer = '';
+				let finished = false;
+
+				while (!finished) {
+					const {done, value} = await reader.read();
+					if (done) break;
+					buffer += decoder.decode(value, {stream: true});
+
+					while (buffer.includes('\n')) {
+						const newlineIndex = buffer.indexOf('\n');
+						const line = buffer.slice(0, newlineIndex);
+						buffer = buffer.slice(newlineIndex + 1);
+						if (!line.trim()) continue;
+
+						const event = JSON.parse(line) as RenderEvent;
+
+						if (event.type === 'stage') {
+							setRenderStage(event.stage);
+							if (event.totalFrames) setRenderFrames({done: 0, total: event.totalFrames});
+						} else if (event.type === 'progress') {
+							setRenderStage('rendering');
+							setRenderProgress(event.progress);
+							setRenderFrames({done: event.renderedFrames, total: event.totalFrames});
+							setEtaMs(event.estimatedRemainingMs);
+						} else if (event.type === 'done') {
+							setRenderStage('done');
+							setRenderProgress(1);
+							const blob = base64ToBlob(event.dataBase64, 'video/mp4');
+							const url = URL.createObjectURL(blob);
+							downloadUrl(url, 'ig-dm-reel.mp4');
+							URL.revokeObjectURL(url);
+							finished = true;
+						} else if (event.type === 'error') {
+							throw new Error(event.error);
+						}
 					}
 				}
 			}
@@ -303,7 +362,11 @@ export default function Page() {
 						<div style={{display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#a8a8a8'}}>
 							<span>{renderStage ? STAGE_LABEL[renderStage] : ''}</span>
 							<span>
-								{renderFrames ? `${renderFrames.done}/${renderFrames.total} frames · ` : ''}
+								{renderFrames
+									? renderFrames.total
+										? `${renderFrames.done}/${renderFrames.total} frames · `
+										: `${renderFrames.done} frames · `
+									: ''}
 								{Math.round(renderProgress * 100)}%
 								{etaMs !== null && etaMs > 300 ? ` · ~${Math.ceil(etaMs / 1000)}s left` : ''}
 							</span>

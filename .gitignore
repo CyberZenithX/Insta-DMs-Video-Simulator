@@ -10,3 +10,7 @@ tsconfig.tsbuildinfo
 
 # Pre-bundled Remotion project, built by `npm run bundle:remotion`
 remotion-bundle
+
+# Local AWS credentials for the lambda:deploy-* scripts — never commit these
+.env
+.env*.local

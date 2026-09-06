@@ -2,47 +2,83 @@ import {NextResponse} from 'next/server';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {openBrowser, renderMedia, selectComposition} from '@remotion/renderer';
 import {baseIgDmReelProps, defaultClock, defaultReceiver} from '../../../src/data/defaultProps';
 import {buildEventsFromScript} from '../../../src/lib/scriptToEvents';
 import {generateRequestSchema, igDmReelPropsSchema} from '../../../src/types';
+import type {GenerateRequest, IgDmReelProps} from '../../../src/types';
+import type {AwsRegion} from '@remotion/lambda/client';
 
 // Headless Chrome + ffmpeg need a real Node.js process, not the Edge runtime.
 export const runtime = 'nodejs';
-// Video rendering is slow; give it the most headroom the plan allows.
+// Video rendering is slow; give it the most headroom the plan allows. Only
+// matters for the local-render fallback below — the Lambda path returns in
+// well under a second regardless of how long the render itself takes.
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 const BUNDLE_DIR = path.join(process.cwd(), 'remotion-bundle');
 
-const isServerlessSandbox = () => Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
-
 /**
- * Locally, Remotion manages its own downloaded Chrome Headless Shell. On
- * Vercel's serverless Node runtime there's no such binary available, so we
- * fall back to a Lambda-compatible prebuilt Chromium instead.
+ * Render capacity, in order of preference:
+ *
+ * 1. Remotion Lambda, if configured (REMOTION_LAMBDA_FUNCTION_NAME set). The
+ *    render runs on AWS Lambda, parallelized across many short invocations —
+ *    this route only has to kick it off (sub-second) and return an id to
+ *    poll. See /api/render/progress. This is what removes the "keep the
+ *    connection open for however long the render takes" ceiling entirely:
+ *    no single request, on Vercel or in the browser, needs to stay open for
+ *    more than a couple of seconds.
+ * 2. Local in-process rendering (the original design), when Lambda isn't
+ *    configured — e.g. `npm run dev` without AWS set up. This still streams
+ *    NDJSON progress and can take tens of seconds to minutes on a long
+ *    script; see decisions.md for why that's a real ceiling on Vercel.
+ *
+ * @remotion/renderer and @sparticuz/chromium are only ever imported inside
+ * renderLocally(), dynamically — so when Lambda is configured, this route
+ * never loads them at all. They're a meaningful amount of code to evaluate
+ * on a cold start, for capacity this route won't use.
  */
-const getBrowserExecutable = async (): Promise<string | null> => {
-	if (!isServerlessSandbox()) return null;
+const isLambdaConfigured = () => Boolean(process.env.REMOTION_LAMBDA_FUNCTION_NAME);
 
-	// @sparticuz/chromium only unpacks its bundled glibc-compat shared
-	// libraries (nss, nspr, etc.) and points LD_LIBRARY_PATH at them when its
-	// own env-var check thinks it's running inside AWS Lambda (it looks for
-	// AWS_EXECUTION_ENV / AWS_LAMBDA_JS_RUNTIME, both checked at import time).
-	// Vercel's Node runtime never sets either, even though it's a Lambda-like
-	// sandbox, so that setup step silently gets skipped: the `chromium`
-	// binary is there, but its dynamic loader can't resolve its dependencies.
-	// Node reports that as a bare "Closed with 127 signal", not a helpful
-	// missing-library error. Setting the var ourselves before the module
-	// loads makes @sparticuz/chromium run its own intended setup, exactly as
-	// its own Netlify integration (a similarly non-Lambda serverless host)
-	// does. Node's own major version decides which of its two library sets
-	// applies, rather than guessing which Vercel image is in use.
-	const nodeMajor = Number(process.versions.node.split('.')[0]);
-	process.env.AWS_LAMBDA_JS_RUNTIME ??= nodeMajor >= 20 ? 'nodejs20.x' : 'nodejs18.x';
+const buildInputProps = (parsed: GenerateRequest): IgDmReelProps => {
+	const {theme, receiverName, receiverUsername, clock, messages} = parsed;
+	return igDmReelPropsSchema.parse({
+		...baseIgDmReelProps,
+		theme,
+		clock: clock || defaultClock,
+		receiver: {
+			...defaultReceiver,
+			name: receiverName,
+			username: receiverUsername || defaultReceiver.username,
+		},
+		events: buildEventsFromScript(messages),
+	});
+};
 
-	const chromium = (await import('@sparticuz/chromium')).default;
-	return chromium.executablePath();
+const renderOnLambda = async (inputProps: IgDmReelProps) => {
+	const {renderMediaOnLambda} = await import('@remotion/lambda/client');
+
+	const functionName = process.env.REMOTION_LAMBDA_FUNCTION_NAME as string;
+	const serveUrl = process.env.REMOTION_LAMBDA_SERVE_URL;
+	const region = process.env.REMOTION_LAMBDA_REGION as AwsRegion | undefined;
+
+	if (!serveUrl || !region) {
+		throw new Error(
+			'REMOTION_LAMBDA_FUNCTION_NAME is set but REMOTION_LAMBDA_SERVE_URL / REMOTION_LAMBDA_REGION are not. All three must be set together — see scripts/lambda-deploy-site.mjs.',
+		);
+	}
+
+	const {renderId, bucketName} = await renderMediaOnLambda({
+		region,
+		functionName,
+		serveUrl,
+		composition: 'IgDmReel',
+		inputProps,
+		codec: 'h264',
+		privacy: 'public',
+	});
+
+	return NextResponse.json({mode: 'lambda', renderId, bucketName, functionName, region});
 };
 
 /**
@@ -58,7 +94,7 @@ type RenderEvent =
 	| {type: 'done'; dataBase64: string}
 	| {type: 'error'; error: string};
 
-export async function POST(request: Request) {
+const renderLocally = async (inputProps: IgDmReelProps) => {
 	if (!fs.existsSync(BUNDLE_DIR)) {
 		return NextResponse.json(
 			{
@@ -69,31 +105,35 @@ export async function POST(request: Request) {
 		);
 	}
 
-	let body: unknown;
-	try {
-		body = await request.json();
-	} catch {
-		return NextResponse.json({error: 'Request body must be JSON.'}, {status: 400});
-	}
+	const {openBrowser, renderMedia, selectComposition} = await import('@remotion/renderer');
 
-	const parsedRequest = generateRequestSchema.safeParse(body);
-	if (!parsedRequest.success) {
-		return NextResponse.json({error: parsedRequest.error.issues[0]?.message ?? 'Invalid request.'}, {status: 400});
-	}
+	const isServerlessSandbox = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 
-	const {theme, receiverName, receiverUsername, clock, messages} = parsedRequest.data;
+	// Locally, Remotion manages its own downloaded Chrome Headless Shell. On
+	// Vercel's serverless Node runtime there's no such binary available, so we
+	// fall back to a Lambda-compatible prebuilt Chromium instead.
+	const getBrowserExecutable = async (): Promise<string | null> => {
+		if (!isServerlessSandbox) return null;
 
-	const inputProps = igDmReelPropsSchema.parse({
-		...baseIgDmReelProps,
-		theme,
-		clock: clock || defaultClock,
-		receiver: {
-			...defaultReceiver,
-			name: receiverName,
-			username: receiverUsername || defaultReceiver.username,
-		},
-		events: buildEventsFromScript(messages),
-	});
+		// @sparticuz/chromium only unpacks its bundled glibc-compat shared
+		// libraries (nss, nspr, etc.) and points LD_LIBRARY_PATH at them when its
+		// own env-var check thinks it's running inside AWS Lambda (it looks for
+		// AWS_EXECUTION_ENV / AWS_LAMBDA_JS_RUNTIME, both checked at import time).
+		// Vercel's Node runtime never sets either, even though it's a Lambda-like
+		// sandbox, so that setup step silently gets skipped: the `chromium`
+		// binary is there, but its dynamic loader can't resolve its dependencies.
+		// Node reports that as a bare "Closed with 127 signal", not a helpful
+		// missing-library error. Setting the var ourselves before the module
+		// loads makes @sparticuz/chromium run its own intended setup, exactly as
+		// its own Netlify integration (a similarly non-Lambda serverless host)
+		// does. Node's own major version decides which of its two library sets
+		// applies, rather than guessing which Vercel image is in use.
+		const nodeMajor = Number(process.versions.node.split('.')[0]);
+		process.env.AWS_LAMBDA_JS_RUNTIME ??= nodeMajor >= 20 ? 'nodejs20.x' : 'nodejs18.x';
+
+		const chromium = (await import('@sparticuz/chromium')).default;
+		return chromium.executablePath();
+	};
 
 	const outputLocation = path.join(
 		os.tmpdir(),
@@ -172,4 +212,34 @@ export async function POST(request: Request) {
 			'Cache-Control': 'no-store',
 		},
 	});
+};
+
+export async function POST(request: Request) {
+	let body: unknown;
+	try {
+		body = await request.json();
+	} catch {
+		return NextResponse.json({error: 'Request body must be JSON.'}, {status: 400});
+	}
+
+	const parsedRequest = generateRequestSchema.safeParse(body);
+	if (!parsedRequest.success) {
+		return NextResponse.json({error: parsedRequest.error.issues[0]?.message ?? 'Invalid request.'}, {status: 400});
+	}
+
+	const inputProps = buildInputProps(parsedRequest.data);
+
+	if (isLambdaConfigured()) {
+		try {
+			return await renderOnLambda(inputProps);
+		} catch (err) {
+			console.error('Failed to start Lambda render', err);
+			return NextResponse.json(
+				{error: err instanceof Error ? err.message : 'Failed to start render.'},
+				{status: 500},
+			);
+		}
+	}
+
+	return renderLocally(inputProps);
 }
