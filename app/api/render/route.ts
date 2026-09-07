@@ -68,6 +68,22 @@ const renderOnLambda = async (inputProps: IgDmReelProps) => {
 		);
 	}
 
+	// Left unset, Remotion fans a render out across as many concurrent Lambda
+	// invocations as it estimates are useful — easily 50-200+ for a few
+	// seconds of video. A brand-new AWS account's default concurrent-execution
+	// (and invoke-TPS) quota is often far below that until AWS's automated
+	// review raises it, so that fan-out gets throttled at the API level with
+	// `Rate Exceeded.` before a single frame renders. Setting
+	// REMOTION_LAMBDA_FRAMES_PER_LAMBDA raises frames-per-invocation, which
+	// lowers the invocation count proportionally, trading render speed for
+	// staying under a low quota. See AWS_LAMBDA_SETUP.md's Troubleshooting
+	// section.
+	const framesPerLambdaEnv = process.env.REMOTION_LAMBDA_FRAMES_PER_LAMBDA;
+	const framesPerLambda = framesPerLambdaEnv ? Number(framesPerLambdaEnv) : undefined;
+	if (framesPerLambdaEnv && (!Number.isInteger(framesPerLambda) || (framesPerLambda as number) <= 0)) {
+		throw new Error('REMOTION_LAMBDA_FRAMES_PER_LAMBDA must be a positive integer.');
+	}
+
 	const {renderId, bucketName} = await renderMediaOnLambda({
 		region,
 		functionName,
@@ -76,6 +92,7 @@ const renderOnLambda = async (inputProps: IgDmReelProps) => {
 		inputProps,
 		codec: 'h264',
 		privacy: 'public',
+		...(framesPerLambda ? {framesPerLambda} : {}),
 	});
 
 	return NextResponse.json({mode: 'lambda', renderId, bucketName, functionName, region});

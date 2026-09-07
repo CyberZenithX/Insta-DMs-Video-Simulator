@@ -140,6 +140,10 @@ Nothing here bills you for existing while idle except S3 storage of whatever's a
 
 ## Troubleshooting
 
+**`Rate Exceeded.`** on a render request — this is AWS Lambda's own throttling error (`TooManyRequestsException`), not a mistake in the setup steps above. `renderMediaOnLambda()` fans a render out across many concurrent Lambda invocations (easily 50-200+ for a few seconds of video), and a brand-new AWS account often starts with a concurrent-execution / invoke-rate quota well below that — AWS raises it automatically after the account has some usage history, usually within a day or two, but there's no guaranteed timeline. Two ways to fix it:
+- **Wait, or request a quota increase now:** `AWS Console → Service Quotas → AWS Lambda → Concurrent executions` (the same console page shows your current limit) — request an increase to the standard 1000 for the region you deployed to.
+- **Immediate workaround, no AWS wait required:** set `REMOTION_LAMBDA_FRAMES_PER_LAMBDA` (e.g. `20`) in the same place you set the other five Lambda env vars. This raises how many frames each Lambda invocation renders, which lowers how many invocations run concurrently — trading render speed for staying under a low quota. Raise the number until renders stop throttling; there's no single right value, it depends on your account's actual quota and the video's frame count.
+
 **`UnrecognizedClientException`** on a render request — the access key/secret pair is wrong, or hasn't propagated yet (AWS credentials can take a few seconds to become valid right after creation). Double-check what's actually set in Vercel's env vars, including for stray whitespace from a copy-paste.
 
 **`AccessDenied` / permission errors during deploy** — almost always the IAM user's policy doesn't match what `lambda:print-policies` currently prints (e.g. you attached it before a Remotion version bump changed the required actions). Re-run the script and re-paste the **user** policy (not the role policy) onto the `remotion-deployer` user.
