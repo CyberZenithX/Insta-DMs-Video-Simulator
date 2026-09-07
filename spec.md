@@ -124,6 +124,7 @@ Set on the Vercel deployment to switch both `/api/render` and `/api/render/progr
 | `REMOTION_LAMBDA_SERVE_URL` | Printed by `npm run lambda:deploy-site` |
 | `REMOTION_LAMBDA_REGION` | Whichever `--region=` you passed to both scripts (default `us-east-1`) |
 | `REMOTION_AWS_ACCESS_KEY_ID` / `REMOTION_AWS_SECRET_ACCESS_KEY` | An IAM user's access keys — see `npm run lambda:print-policies` for the exact policy to attach |
+| `REMOTION_LAMBDA_FRAMES_PER_LAMBDA` (optional) | Caps how many concurrent Lambda invocations one render fans out to, by raising frames handled per invocation. Unset = Remotion's own estimate. See AWS_LAMBDA_SETUP.md's Troubleshooting → `Rate Exceeded.` |
 
 None of these are read anywhere except inside the two API routes above (dynamically imported, not touched at module load) — a deployment with none of them set runs entirely in local-render mode, unchanged from before Lambda existed.
 
