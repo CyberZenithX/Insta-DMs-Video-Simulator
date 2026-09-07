@@ -67,13 +67,22 @@ Request body (`generateRequestSchema`, `src/types.ts`):
 }
 ```
 
-Server behavior:
+Server behavior, steps 1–3 identical regardless of render mode:
 1. Validate the body against `generateRequestSchema`. Fails closed with `400` and the first Zod issue message on any violation — nothing renders on invalid input.
 2. Turn `messages` into a full `TimelineEvent[]` via `buildEventsFromScript()` (`src/lib/scriptToEvents.ts`) — the same function the live preview uses, so preview and output can't drift. A `'them'` message gets a preceding typing beat (1.2s, +0.15s gap); a `'me'` message spends an equivalent beat but draws no bubble (see the `typing` constraint above). Read pause after each message: `min(1.6, 0.5 + 0.02 × text.length)` seconds.
 3. Merge with `baseIgDmReelProps` + `defaultReceiver` (name/username overridden from the request), validate the assembled object against `igDmReelPropsSchema`.
+
+Step 4 branches on whether Remotion Lambda is configured (`REMOTION_LAMBDA_FUNCTION_NAME` env var set):
+
+**Lambda mode** (`REMOTION_LAMBDA_FUNCTION_NAME` set — the intended production path):
+4. `renderMediaOnLambda()` (`@remotion/lambda/client` — no `@remotion/renderer`/Chromium touched in this route at all) kicks off an async render on AWS Lambda against the deployed `serveUrl` (an S3-hosted bundle, not the local `remotion-bundle/`), then returns immediately.
+
+Response: `200`, `Content-Type: application/json`, body `{mode: 'lambda', renderId: string, bucketName: string, functionName: string, region: string}`. This response arrives in well under a second regardless of how long the render itself takes — the client is expected to then poll `GET /api/render/progress` (below) rather than wait on this request.
+
+**Local-render mode** (no `REMOTION_LAMBDA_FUNCTION_NAME` — used for `npm run dev` without AWS set up, and the only mode available before Remotion Lambda was added):
 4. One headless browser is opened (`openBrowser()`) and shared between `selectComposition` and `renderMedia` against the pre-built bundle at `remotion-bundle/` (must exist — built by `npm run bundle:remotion`, part of `npm run build`). Browser binary: `@sparticuz/chromium` when `VERCEL` or `AWS_LAMBDA_FUNCTION_NAME` is set, otherwise Remotion's own local browser.
 
-Response on a valid request: `200`, `Content-Type: application/x-ndjson`, a **streamed**, newline-delimited sequence of JSON events (not one buffered response) — the client is expected to read `response.body` incrementally, not `await response.json()`/`.blob()`:
+Response: `200`, `Content-Type: application/x-ndjson`, a **streamed**, newline-delimited sequence of JSON events (not one buffered response) — the client is expected to read `response.body` incrementally, not `await response.json()`/`.blob()`:
 
 ```ts
 {type: 'stage'; stage: 'launching'|'resolving'|'rendering'|'stitching'; totalFrames?: number}
@@ -82,13 +91,45 @@ Response on a valid request: `200`, `Content-Type: application/x-ndjson`, a **st
 {type: 'error'; error: string}       // in place of 'done', if the render fails after streaming has started
 ```
 
-A request that fails **validation** never reaches the stream at all: `400`/`500` with a plain synchronous `{error: string}` JSON body, same as before — bundle-directory missing is a `500` at this stage, invalid body shape is a `400`.
+The client distinguishes the two modes by response `Content-Type`, not by any request parameter — the choice is entirely server-side, driven by which env vars are configured on the deployment.
 
-No authentication. No rate limiting beyond the length caps above.
+A request that fails **validation** never reaches either render mode: `400` with a plain synchronous `{error: string}` JSON body regardless of mode. `500` for local-mode's missing-bundle-directory check; Lambda mode has no local precondition to check, so its only `500`s come from the AWS SDK call itself failing (bad credentials, function doesn't exist, etc.).
+
+### `GET /api/render/progress`
+
+Lambda mode only — a `500` with `{error: string}` if `REMOTION_LAMBDA_FUNCTION_NAME` isn't set. Query params: `renderId`, `bucketName` (both from the `POST /api/render` response). Calls `getRenderProgress()` — a status check against AWS, not a render — and returns:
+
+```ts
+{
+  done: boolean;
+  overallProgress: number;        // 0–1
+  framesRendered: number;
+  fatalErrorEncountered: boolean;
+  errors: string[];               // messages only, from EnhancedErrorInfo[]
+  outputFile: string | null;      // a directly downloadable S3 URL once done
+}
+```
+
+This always returns in well under a second, regardless of how the render itself is progressing — the client is expected to call it repeatedly (every 1.5s in `app/page.tsx`) rather than expect it to block until done. `outputFile` is a **direct S3 URL** (output privacy is `'public'`, set in `renderMediaOnLambda`'s call) — the finished video is never proxied through this Next.js app at all; the client hands the browser that URL directly for download.
+
+No authentication on either route. No rate limiting beyond the length caps above.
+
+## Environment variables (Lambda mode)
+
+Set on the Vercel deployment to switch both `/api/render` and `/api/render/progress` into Lambda mode. All four are required together — see `scripts/lambda-deploy-function.mjs` and `scripts/lambda-deploy-site.mjs`, which print the first three after a successful deploy.
+
+| Variable | Where it comes from |
+|---|---|
+| `REMOTION_LAMBDA_FUNCTION_NAME` | Printed by `npm run lambda:deploy-function` |
+| `REMOTION_LAMBDA_SERVE_URL` | Printed by `npm run lambda:deploy-site` |
+| `REMOTION_LAMBDA_REGION` | Whichever `--region=` you passed to both scripts (default `us-east-1`) |
+| `REMOTION_AWS_ACCESS_KEY_ID` / `REMOTION_AWS_SECRET_ACCESS_KEY` | An IAM user's access keys — see `npm run lambda:print-policies` for the exact policy to attach |
+
+None of these are read anywhere except inside the two API routes above (dynamically imported, not touched at module load) — a deployment with none of them set runs entirely in local-render mode, unchanged from before Lambda existed.
 
 ## Out of scope
 
-- No persistence — nothing is saved server-side; each `/api/render` call is stateless in, MP4 out.
+- No persistence *in this app* — the Next.js server itself is stateless, request in, response out either way. In Lambda mode the rendered MP4 does land in S3 (that's what `outputFile` points at) and stays there under whatever lifecycle/expiry Remotion Lambda's own deploy sets up — not something this app manages or exposes as a feature (no gallery of past renders, no way to re-fetch an old `renderId`).
 - No account system, no saved scripts, no share links.
 - No video/image/gradient chat backgrounds from the UI (schema allows it, nothing wires it up).
 - No custom avatar upload — fixed to `public/avatar-demo.svg`.

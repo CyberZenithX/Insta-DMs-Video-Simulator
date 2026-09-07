@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A fake-Instagram-DM **Reel generator**. `src/` is a Remotion project that animates a scripted DM conversation as a 1080×1920 video; `app/` is a Next.js UI wrapped around it (live preview + a "Generate MP4" button that renders server-side). Deploy target is Vercel.
+A fake-Instagram-DM **Reel generator**. `src/` is a Remotion project that animates a scripted DM conversation as a 1080×1920 video; `app/` is a Next.js UI wrapped around it (live preview + a "Generate MP4" button that renders server-side). Deploy target is Vercel. Actual rendering happens one of two ways — see "Two render backends" below.
 
 ## Commands
 
@@ -15,9 +15,15 @@ npm start                # serve the production build (requires npm run build fi
 npm run bundle:remotion  # rebuild only the Remotion bundle that /api/render serves
 npm run studio           # Remotion Studio — visual timeline/props editor for the composition
 npm run typecheck        # tsc --noEmit
+
+npm run lambda:print-policies    # print the exact IAM policy JSON for this Remotion version
+npm run lambda:deploy-function   # deploy (or reuse) the AWS Lambda function that renders frames
+npm run lambda:deploy-site       # bundle src/ and upload it to S3; run again after any src/ change
 ```
 
-`/api/render` reads a pre-built bundle from `remotion-bundle/` on disk. If that directory is missing the route returns a 500 telling you to build. After changing anything under `src/`, re-run `npm run bundle:remotion` or the API will keep serving the stale bundle — the Next dev server will not pick up composition changes on its own.
+`/api/render` reads a pre-built bundle from `remotion-bundle/` on disk. If that directory is missing the route returns a 500 telling you to build. After changing anything under `src/`, re-run `npm run bundle:remotion` or the API will keep serving the stale bundle — the Next dev server will not pick up composition changes on its own. **This bundle is only used by local-render mode** — Lambda mode reads the separately-deployed S3 site instead, so a `src/` change also needs `npm run lambda:deploy-site` re-run before it shows up there.
+
+The three `lambda:*` scripts need `REMOTION_AWS_ACCESS_KEY_ID`/`REMOTION_AWS_SECRET_ACCESS_KEY` set in the shell (an IAM user with the policy from `lambda:print-policies`) — never commit these. See `spec.md` → "Environment variables (Lambda mode)" for the full list of what the deployed app itself needs, or `AWS_LAMBDA_SETUP.md` for the full step-by-step account setup (doubles as an AWS primer).
 
 ### There are no tests
 
@@ -72,9 +78,20 @@ One master gradient is sampled per-bubble by that bubble's *live viewport positi
 
 The system emoji font is bypassed. `src/emoji/parse.ts` tokenizes emoji out of message text and maps each to a Noto Color Emoji filename by codepoint (`👀` → `emoji_u1f440.png`), served from `public/emoji/`. **Adding an emoji to a script requires adding the matching PNG** — otherwise it 404s mid-render and the render fails. Only a handful are currently vendored.
 
-### Next.js layer — five load-bearing gotchas
+### Two render backends
 
-These are all fixes for real failures; changing them will break the build or the render:
+`/api/render` (`app/api/render/route.ts`) picks its render backend at request time based on one env var, `REMOTION_LAMBDA_FUNCTION_NAME`:
+
+- **Set → Lambda mode.** `renderMediaOnLambda()` (from `@remotion/lambda/client` — deliberately *not* the full `@remotion/lambda`, which pulls in `@remotion/renderer`/`@remotion/bundler` types) kicks off an async render on AWS Lambda and returns in well under a second. The client then polls `GET /api/render/progress`, which is equally fast. **No request in this whole flow — not the Vercel function, not the browser's fetch — ever needs to stay open for as long as the render takes.** This is what actually solves "a render can take minutes, but nothing should have to wait on one open connection for minutes," rather than just making the wait more legible (that was the NDJSON-streaming fallback below, solved at the UI layer only).
+- **Unset → local-render mode** (the original design, still what `npm run dev` uses without any AWS setup). Renders in-process using `@remotion/renderer` directly against the bundle in `remotion-bundle/`, streaming NDJSON progress over one held-open connection — this is the thing Lambda mode exists to avoid needing in production, but it's a fine fallback for local iteration.
+
+Both branches build the same `IgDmReelProps` from the same request body first (theme/receiver/clock/messages → `buildEventsFromScript()` → validated against `igDmReelPropsSchema`) — the branch only decides how that gets rendered, not what. `@remotion/renderer` and `@sparticuz/chromium` are dynamically imported *inside* the local-render branch specifically so that Lambda mode's cold start never evaluates them at all.
+
+Lambda deploys are managed by `scripts/lambda-deploy-function.mjs` / `scripts/lambda-deploy-site.mjs`, run manually (never as part of `npm run build`) — see the Commands section above and `spec.md` for the full env var contract.
+
+### Next.js layer — five load-bearing gotchas (local-render mode)
+
+These only apply when local-render mode is in play — either because Lambda isn't configured, or because you're running `npm run dev`. They're all fixes for real failures; changing them will break the build or the render:
 
 1. **Anything imported by `app/api/render/route.ts` must not import the `remotion` React barrel.** That's why `src/data/defaultProps.ts` hardcodes `'/avatar-demo.svg'` instead of calling `staticFile()`. Violating this fails the Next server build with `React.createContext is undefined`.
 2. **`serverComponentsExternalPackages`** (`next.config.js`) keeps `@remotion/renderer` and `@sparticuz/chromium` out of webpack — bundling mangles their CDP/websocket and native code.

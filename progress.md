@@ -1,17 +1,26 @@
 # Progress
 
-Status as of the session ending 2026-08-23.
+Status as of the session ending 2026-09-06.
 
 ## Latest
 
-PR #3 (compositor binaries, browser-launch fix, receiver-name validation, session docs) **merged**. The one thing it couldn't verify from this sandbox — whether the browser-launch fix actually works on real Vercel infrastructure — is still open; see "Immediate next step."
+**Remotion Lambda added as the primary render backend**, replacing the render-duration ceiling entirely rather than just making the wait more legible (which is what the streamed-progress bar from the previous round did). See `decisions.md` → "Remotion Lambda, not client-side rendering or a hard length cap" for the full reasoning.
 
-New this round, on top of that: **the render experience itself**.
+`/api/render` now branches on one env var, `REMOTION_LAMBDA_FUNCTION_NAME`:
 
-1. **The UI gave no feedback during a render** beyond static "Rendering… this can take a minute" text — for a script that legitimately takes tens of seconds, that reads as hung. `/api/render` now streams newline-delimited JSON progress events instead of buffering the whole response, and the page renders a live progress bar from them: stage label, frame count, percentage, and a `~Ns left` estimate (forwarded straight from `renderMedia`'s own remaining-time calculation, not computed by hand). Verified by actually driving the UI in a real browser (Playwright) and screenshotting the bar mid-render, not just reading the code.
-2. **One redundant browser launch removed.** `selectComposition` and `renderMedia` each launched their own headless Chrome; now one is opened via `openBrowser()` and shared between both. A real reduction in work, not a tuned parameter — `concurrency`/`jpegQuality` were deliberately left alone, since guessing wrong on those risks OOM on Vercel's fixed memory budget and can't be verified against real Vercel infrastructure from here. The saving should be more pronounced on Vercel (where launching `@sparticuz/chromium` means decompressing a bundled binary on every cold start) than it appeared locally.
+- **Set → Lambda mode.** `renderMediaOnLambda()` kicks off an async render on AWS Lambda and returns in well under a second, regardless of script length. The client polls a new `GET /api/render/progress` endpoint (also always fast) until done, then downloads directly from the S3 URL it returns — the video is never proxied through the Next.js app at all.
+- **Unset → local-render mode**, unchanged from before — this is what `npm run dev` still uses without any AWS setup, and remains a real fallback, not dead code.
 
-This landed as PR #4 — see "Where things stand."
+Three new scripts (`npm run lambda:print-policies` / `lambda:deploy-function` / `lambda:deploy-site`) drive the one-time AWS setup, run manually by whoever has AWS credentials — never as part of `npm run build`.
+
+**This is the biggest gap in verification so far, and it's an honest one: no successful Lambda render has actually happened yet.** What *has* been verified, concretely:
+
+- Every function signature, the exact IAM policy JSON, and the credential env var names were pulled from the actually-installed `@remotion/lambda`/`@remotion/lambda-client` packages — not from memory or docs that could be stale for this pinned version. (This caught a real thing: this version's `@remotion/cli` has no `lambda` subcommand at all, unlike what generic Remotion docs describe — the deploy scripts call the programmatic API directly instead of shelling out to a CLI that doesn't exist here.)
+- The Lambda code branch was proven to *activate* correctly: a request with deliberately-fake AWS credentials returned AWS's own real `UnrecognizedClientException` in ~0.4 seconds — proof the branch fires, calls real AWS infrastructure, and fails cleanly rather than crashing. It also proved this sandbox's network *can* reach AWS's API, unlike `vercel.app`.
+- The untouched local-render fallback was re-tested end-to-end after the refactor (dynamic imports, function extraction) and still produces valid MP4s exactly as before.
+- Full clean build, typecheck, and trace-manifest inspection all pass.
+
+What's *not* verified because it requires a real AWS account this sandbox doesn't have: an actual `deployFunction`/`deploySite` run, a real render actually completing on Lambda, a real `getRenderProgress` poll loop reaching `done: true` with a working `outputFile` URL. See "Immediate next step."
 
 ## Where things stand
 
@@ -22,57 +31,60 @@ This landed as PR #4 — see "Where things stand."
 | PR #1 | [merged](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/1) — reference images through the web UI |
 | PR #2 | [merged](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/2) — typing fix + avatar-path fix |
 | PR #3 | [merged](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/3) — compositor-binaries fix, browser-launch fix, receiver-name validation fix, session docs |
-| PR #4 | **[open](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/4), needs merge + redeploy** — streamed render progress + the shared-browser speed fix |
+| PR #4 | [merged](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/4) — streamed render progress + the shared-browser speed fix |
+| PR #5 | **[open](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/5)**, not yet merged — Remotion Lambda backend |
 | Working tree | clean, everything pushed |
 
-**Before starting new work: check whether PR #4 has merged.** If it has and you need to push to this branch again, rebase onto current `main` first — do not push onto the old head. This has now happened three times (after PR #1, PR #2, and PR #3); see `decisions.md` → "The branch keeps getting reused after its PR merges."
+**Before starting new work: check whether the branch's most recent PR has merged.** If it has and you need to push to this branch again, rebase onto current `main` first — do not push onto the old head. This has now happened three times (after PR #1, PR #2, and PR #3); see `decisions.md` → "The branch keeps getting reused after its PR merges."
 
 ## Immediate next step
 
-1. Merge PR #4.
-2. Redeploy on Vercel.
-3. On the live site: fill in the default script, click **Generate MP4**, and watch for two things at once:
-   - **Does the browser launch at all?** This is the still-unconfirmed fix from PR #3. If you see `Failed to launch the browser process! ... Closed with 127 signal`, that fix didn't hold — dig into whether Vercel's underlying image actually matches AL2023 (try forcing `nodejs18.x`/AL2 instead of the auto-detected version, or pin an older `@sparticuz/chromium`). A *different* error means that part worked and something else broke.
-   - **Does the progress bar move?** Confirms the streamed-response change works through Vercel's serverless/edge layer in production, which — like the browser-launch fix — could only be verified locally, not against real Vercel infrastructure.
-4. Confirm a valid MP4 downloads, with no stranded typing bubbles and messages in chronological order (PR #2's fix, last confirmed working via local rendering, not yet on the live site either).
-5. Only after all of the above holds is the full pipeline — compositor, browser launch, streamed progress, typing/ordering — confirmed end to end on Vercel. Everything under "Not verified" below is downstream of this.
+This is a two-track next step — the AWS side needs a human with an AWS account (or credentials handed to a session that can act on them), the deploy side is otherwise fully scripted:
+
+1. **Follow `AWS_LAMBDA_SETUP.md`** — the full runbook (create the IAM user/role, generate keys, run the two deploy scripts, set Vercel env vars). It's written to double as an AWS primer, not just a checklist; the steps below are the condensed version.
+2. **Click Generate MP4 on the live site** once that's done. This is the first real end-to-end test of the entire Lambda path — deploy, trigger, poll, download — none of which has run against real infrastructure yet.
+3. Separately, still unconfirmed from the last two rounds and not superseded by this one: the browser-launch fix and the streamed-progress fallback both still only matter if Lambda *isn't* configured, or if step 1 above hasn't happened yet. If this deployment ships without AWS set up, those are still the open questions — see the PR #3/#4 history in git log for what they were.
+
+If a session with real (ideally scoped/temporary) AWS credentials picks this up, `AWS_LAMBDA_SETUP.md`'s steps can be done directly rather than handed to a human — the deploy scripts and routes are already written and waiting.
 
 ## Done and verified
 
 - **Reference screenshots** committed to `references/` — all geometry and theme colors are calibrated against them.
 - **Remotion composition** (`IgDmReel`) renders a scripted DM conversation: typing bubbles that morph into messages, spring-driven scroll, scroll-position-sampled gradient, image-based emoji, reaction badges. Second composition `SafeZoneGrid` for calibration.
-- **Full-bleed layout fix.** The mockup previously rendered at 76% width, left-aligned, baking a permanent blank strip into every export. Now fills the frame edge to edge. Verified by rendering stills before/after.
+- **Full-bleed layout fix.** Verified by rendering stills before/after.
 - **9 theme presets**, selectable via a `theme` prop. Verified each renders; sent-bubble contrast checked against every themed backdrop.
 - **Frame determinism** re-confirmed after the layout changes — two renders of the same frame are byte-identical.
-- **The typing/ordering fix**, rendered against the exact deployed default script at the frames that previously showed the bug: one typing bubble as the newest stack item, none stranded, chronological order correct.
-- **The compositor-binaries fix**, verified against the built trace manifest: the native `remotion` binary and all seven `libav*.so` are present, the local Chrome Headless Shell contributes 0 bytes, function size 93.8MB.
-- **The browser-launch fix**, verified against the installed `@sparticuz/chromium` package directly (before/after `LD_LIBRARY_PATH` behavior). **Still not verified against a real Vercel container** — see "Immediate next step."
+- **The typing/ordering fix**, rendered against the exact deployed default script at the frames that previously showed the bug.
+- **The compositor-binaries fix**, verified against the built trace manifest.
+- **The browser-launch fix**, verified against the installed `@sparticuz/chromium` package directly. **Still not verified against a real Vercel container.**
 - **The receiver-name validation fix**, verified by re-reading the request payload against `generateRequestSchema`.
-- **Streamed render progress**, verified two ways: (1) a real `POST /api/render` showing events flow `0 → 1` across the correct stage sequence with a valid MP4 as the final payload, and (2) actually driving the UI in a real browser (Playwright) and screenshotting the progress bar mid-render — frame counts, percentage, and ETA all live-updating, reverting cleanly to the idle button on completion.
-- **The shared-browser speed fix**, verified by successful local renders after the change (same correctness, one less browser launch). The actual time saving is expected to show up more on Vercel than locally — not independently measurable from this sandbox.
+- **Streamed render progress** (local-render mode), verified via a real render and a real Playwright UI pass.
+- **The shared-browser speed fix**, verified by successful local renders after the change; actual time saving on Vercel specifically not independently measurable from this sandbox.
+- **The Remotion Lambda code path**, verified as far as this sandbox can: real package signatures/policies/CLI surface, the branch activating and failing cleanly against fake credentials, the local fallback unaffected by the refactor, full build/typecheck clean. **Not verified: an actual successful render.**
 - **Local render pipeline** (`npm run build && npm start`, then real `POST /api/render` calls) produces valid, playable MP4s.
-- **Typecheck** clean throughout.
+- **Typecheck** clean throughout, including after this round's route.ts restructuring (dynamic imports, function extraction to share logic between the two render modes).
 
 ## Not verified / open
 
-- **PR #4 hasn't merged or redeployed yet** — see "Immediate next step."
-- **Nothing about the render pipeline has been confirmed on an actual Vercel deploy yet** — compositor binaries, browser launch, streamed progress, and shared-browser reuse were all built and verified locally/against real Vercel constraints (trace manifests, package logic, function size limits) but never against a live Vercel container, because this sandbox's network proxy blocks `vercel.app` (confirmed by testing directly — 403 on the CONNECT tunnel). Every fix in PRs #3 and #4 is theoretically sound and locally verified, but "click Generate MP4 on the live site" is still the one step nothing has substituted for.
+- **No AWS deploy or real Lambda render has happened yet** — see "Immediate next step." This is the load-bearing unknown right now; everything else in this list is secondary to it.
+- **Nothing about the *local-render* pipeline has been confirmed on an actual Vercel deploy either** — compositor binaries, browser launch, streamed progress, shared-browser reuse were all built and verified locally/against real Vercel constraints (trace manifests, package logic, function size limits) but never against a live Vercel container, because this sandbox's network proxy blocks `vercel.app`. Only matters if a deployment ships without Lambda configured.
 - **`background` prop is currently inert** for every `kind`, discovered while writing `spec.md`. Not a regression from this work, not yet fixed — see `decisions.md`.
-- **`/api/render` is unauthenticated.** Script length is capped (40 messages × 280 chars) as a basic guardrail, but there's no auth or rate limiting — and a render is now a longer-lived streaming connection per request, which is a slightly larger resource footprint per abuse attempt than the old buffered version.
-- **`maxDuration = 300` may not be what's actually in effect.** Hobby caps function duration at 60s and rejects deploys above that. Worth confirming which plan this is on.
-- **Transitive CVEs.** Remotion is pinned at 4.0.290; `extract-zip`, `webpack`, and `ws` have known advisories that only clear by bumping the whole toolchain to 4.0.515+. Left pinned deliberately — build/dev-time paths, not attacker-reachable.
-- **Remotion licensing.** Dual-licensed; companies above certain revenue/headcount thresholds need a paid license. See https://remotion.dev/license.
+- **`/api/render` is unauthenticated on both modes.** Lambda mode changes the abuse-cost shape (a bad actor now costs AWS-Lambda-seconds instead of Vercel-function-seconds) but doesn't remove the problem. Script length is still capped (40 messages × 280 chars) as the only guardrail.
+- **`maxDuration = 300` may not be what's actually in effect** in local-render mode. Hobby caps function duration at 60s and rejects deploys above that. Doesn't matter in Lambda mode, where this route returns in under a second regardless.
+- **Transitive CVEs**, now a larger surface: `npm install @remotion/lambda` pulled in the full AWS SDK v3 client set, and `npm audit` now reports 44 advisories (up from 15) — not independently triaged yet, same "left pinned deliberately, revisit with time to re-verify" posture as the existing Remotion-version CVEs below.
+- **Remotion licensing.** Dual-licensed; companies above certain revenue/headcount thresholds need a paid license. See https://remotion.dev/license. (Also worth checking Remotion Lambda's own licensing terms specifically — it may differ from the core library.)
 - **Sent bubbles sit where Instagram's icon rail lands.** A product call, not resolved.
-- **No automated tests.** Verification is manual still/video rendering (and, now, one manual Playwright UI pass).
-- **Emoji coverage is thin.** Only 👀 💀 🔥 🤷 😂 are vendored. Any other emoji 404s mid-render — no fallback.
+- **No automated tests.** Verification is manual still/video rendering.
+- **Emoji coverage is thin.** Only 👀 💀 🔥 🤷 😂 are vendored.
 - **Avatar is a placeholder**, no upload path in the UI.
-- **UI covers a subset of props** — see `spec.md` → "The web app." Reactions, custom backgrounds, spring tuning, and safe-zone tweaking are Studio/CLI-only.
-- **No further render-speed optimization attempted beyond the shared-browser fix.** `concurrency` and `jpegQuality` are both real levers but weren't touched — see `decisions.md` for why.
+- **UI covers a subset of props** — see `spec.md` → "The web app."
+- **`concurrency`/`jpegQuality` still untouched** — see `decisions.md`. Now double-relevant: these apply to `renderMediaOnLambda` too (it accepts both), and Lambda's memory/CPU limits are a different, real budget from Vercel's — still shouldn't be tuned blind.
+- **S3 lifecycle/expiry for rendered outputs** is whatever Remotion Lambda's own deploy sets up by default — not reviewed or overridden here. Worth checking once real renders exist, so old output doesn't quietly accumulate storage cost.
 
 ## Suggested next steps
 
-1. Merge PR #4, redeploy, confirm **Generate MP4** works on the live site with a moving progress bar and no browser-launch error — closes out every remaining unknown from PRs #3 and #4 at once.
-2. Confirm which Vercel plan this is on and whether `maxDuration = 300` is actually in effect.
-3. Add auth or rate limiting to `/api/render` before sharing the deployed URL further.
-4. Decide what to do about the inert `background` prop (fix it or retire it) and the icon-rail overlap — both are product calls now that the technical picture is clear.
-5. If render time still matters after confirming the shared-browser fix's real-world effect, the next lever is `concurrency` — but tune it live against Vercel's actual memory limits, not by guessing.
+1. Get AWS credentials into a session (human-driven or handed to an agent) and actually run steps 1–4 under "Immediate next step" — this is the one thing that turns "should work, verified against real package internals" into "works."
+2. Once a real render succeeds, decide whether to keep the local-render fallback long-term or whether Lambda-only (with a clear error if unconfigured) is simpler to maintain going forward.
+3. Add auth or rate limiting to `/api/render` — matters more now, not less, since Lambda mode makes a single request cheaper to fire off and forget for an attacker (the response is instant either way; only actual compute happens later, off the requester's connection).
+4. Decide what to do about the inert `background` prop and the icon-rail overlap — both are product calls now that the technical picture is clear.
+5. Triage the new CVE surface from `@remotion/lambda`'s AWS SDK dependencies, on the same "deliberately, with time to re-verify" timeline as the existing ones.
