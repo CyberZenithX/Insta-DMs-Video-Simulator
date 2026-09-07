@@ -5,11 +5,17 @@ import type {IgDmReelProps} from '../types';
 // free of any import from the `remotion` package's React-bearing barrel, or
 // Next's server build crashes with "React.createContext is undefined".
 //
-// So the avatar is stored as a plain root path, which is correct for the two
-// contexts that serve public/ at root: the Next.js <Player> preview, and
-// /api/render (whose bundle has public/ flattened into it). Remotion Studio
-// and the `remotion` CLI set window.remotion_staticBase and therefore need
-// staticFile() — Root.tsx, which may import the barrel, applies it there.
+// So `receiver.avatar` is stored as a bare public/-relative filename, not a
+// resolved URL — DmHeader.tsx (browser context, already imports `remotion`)
+// is the sole reader of it and resolves it through staticFile() at the point
+// of use. That's deliberate, not incidental: staticFile() is the one thing
+// that resolves correctly in every context this value flows through —
+// Remotion Studio, the Next.js <Player> preview, local in-process rendering
+// (remotion-bundle/, with public/ flattened into its root — see
+// bundle-remotion.mjs), and a Remotion Lambda deploy, whose site lives under
+// an S3 prefix (`sites/<name>/...`), not the bucket root. A hardcoded
+// root-relative path like `/avatar-demo.svg` looked correct locally but
+// silently resolved against the S3 bucket's own root on Lambda, 404ing.
 
 export const defaultAvatarFile = 'avatar-demo.svg';
 
@@ -24,7 +30,7 @@ export const defaultSafeZones = {
 export const defaultReceiver: IgDmReelProps['receiver'] = {
 	name: 'Jordan',
 	username: '@jordan.codes',
-	avatar: `/${defaultAvatarFile}`,
+	avatar: defaultAvatarFile,
 	activeNow: true,
 };
 

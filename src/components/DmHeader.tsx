@@ -1,5 +1,5 @@
 import React from 'react';
-import {Img} from 'remotion';
+import {Img, staticFile} from 'remotion';
 import {interFontFamily} from '../lib/font';
 import {layout, colors} from '../tokens';
 import type {IgDmReelProps} from '../types';
@@ -56,7 +56,13 @@ export const DmHeader: React.FC<{
 		>
 			<Chevron sizePx={chevronSize} />
 			<Img
-				src={receiver.avatar}
+				// receiver.avatar is a bare public/-relative filename, not a
+				// resolved URL (see src/data/defaultProps.ts) — staticFile()
+				// is what makes it resolve correctly whether this renders in
+				// Remotion Studio, the <Player> preview, local in-process
+				// rendering, or on Remotion Lambda, each of which serves
+				// public/ from a different actual base path.
+				src={staticFile(receiver.avatar)}
 				style={{
 					width: avatarSize,
 					height: avatarSize,

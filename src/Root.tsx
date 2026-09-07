@@ -1,16 +1,10 @@
 import React from 'react';
-import {Composition, staticFile} from 'remotion';
+import {Composition} from 'remotion';
 import {IgDmReel, calculateIgDmReelMetadata} from './compositions/IgDmReel';
 import {SafeZoneGrid} from './compositions/SafeZoneGrid';
 import {igDmReelPropsSchema, safeZoneGridPropsSchema} from './types';
 import {demoEvents} from './data/demoEvents';
-import {
-	baseIgDmReelProps,
-	defaultReceiver,
-	defaultClock,
-	defaultSafeZones,
-	defaultAvatarFile,
-} from './data/defaultProps';
+import {baseIgDmReelProps, defaultReceiver, defaultClock, defaultSafeZones} from './data/defaultProps';
 import {FPS, WIDTH, HEIGHT} from './constants';
 
 export const RemotionRoot: React.FC = () => {
@@ -28,9 +22,7 @@ export const RemotionRoot: React.FC = () => {
 				defaultProps={{
 					...baseIgDmReelProps,
 					events: demoEvents,
-					// Studio/CLI set window.remotion_staticBase, so the asset
-					// path has to go through staticFile() here.
-					receiver: {...defaultReceiver, avatar: staticFile(defaultAvatarFile)},
+					receiver: defaultReceiver,
 					clock: defaultClock,
 					theme: 'none',
 				}}
