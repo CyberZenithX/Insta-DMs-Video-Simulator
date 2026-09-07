@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A fake-Instagram-DM **Reel generator**. `src/` is a Remotion project that animates a scripted DM conversation as a 1080×1920 video; `app/` is a Next.js UI wrapped around it (live preview + a "Generate MP4" button that renders server-side). Deploy target is Vercel. Actual rendering happens one of two ways — see "Two render backends" below.
 
+## Working agreement: touching `src/`
+
+The user is running Remotion Lambda in production, deployed from a manual snapshot (`npm run lambda:deploy-site`), not a live connection to this repo — see "Two render backends" below. That means any change under `src/` (or `public/`) leaves the deployed Lambda site stale until they re-run a command themselves in their own terminal (this session cannot do it for them: it needs their AWS credentials, which are never to be committed or requested here).
+
+So:
+- **Ask before editing anything under `src/` or `public/`.** Don't make the change first and mention it after.
+- **Once a change under `src/`/`public/` is made and pushed**, always tell the user the exact command to run afterward:
+  - Composition/asset change only → `npm run lambda:deploy-site -- --region=<their region>`
+  - Also bumped the `@remotion/lambda`/`remotion` version, or changed `scripts/lambda-deploy-function.mjs`'s memory/timeout/disk settings → `npm run lambda:deploy-function` too (both need `REMOTION_AWS_ACCESS_KEY_ID`/`REMOTION_AWS_SECRET_ACCESS_KEY` set in their shell — never ask for or commit these).
+- This doesn't apply to `app/` — that ships via their normal Vercel deploy, not a manual AWS step.
+
 ## Commands
 
 ```bash
