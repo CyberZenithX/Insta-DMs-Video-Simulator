@@ -54,10 +54,51 @@ export const createMeasurer = (
 };
 
 /**
+ * Splits a single word that is itself wider than the line box into chunks
+ * that each fit, mirroring CSS `overflow-wrap: break-word`.
+ *
+ * Greedy word wrap alone can only break *between* words, so one long
+ * unbroken token (a pasted URL is the everyday case) produced a line wider
+ * than maxWidthPx. The bubble is sized to at most maxWidthPx, so that line
+ * then ran past the bubble's edge and was silently cut off by its
+ * `overflow: hidden` — text lost, off the side of the frame.
+ *
+ * Iterates code points rather than UTF-16 units so a surrogate pair is never
+ * split into two halves.
+ */
+const breakOversizedWord = (
+	text: string,
+	measureText: (s: string) => number,
+	maxWidthPx: number,
+): WrapUnit[] => {
+	const chunks: WrapUnit[] = [];
+	let current = '';
+
+	for (const char of Array.from(text)) {
+		const candidate = current + char;
+		// `current !== ''` guarantees progress: a single character wider than
+		// the line box still gets emitted rather than looping forever.
+		if (current !== '' && measureText(candidate) > maxWidthPx) {
+			chunks.push({kind: 'word', text: current, width: measureText(current)});
+			current = char;
+		} else {
+			current = candidate;
+		}
+	}
+
+	if (current !== '') {
+		chunks.push({kind: 'word', text: current, width: measureText(current)});
+	}
+
+	return chunks;
+};
+
+/**
  * Wraps message text (with emoji already tokenised) into lines that fit
  * within maxWidthPx, using greedy word wrap with emoji treated as atomic
  * square glyphs of side `emojiSizePx`. Leading/trailing whitespace on each
- * wrapped line is dropped, matching normal CSS text wrapping.
+ * wrapped line is dropped, matching normal CSS text wrapping. A word too
+ * wide to fit on a line of its own is broken mid-word (see above).
  */
 export const wrapMessageText = (
 	text: string,
@@ -76,10 +117,17 @@ export const wrapMessageText = (
 		const parts = token.value.match(/\s+|\S+/g) ?? [];
 		for (const part of parts) {
 			const isSpace = /^\s+$/.test(part);
+			const width = measurer.measureText(part);
+
+			if (!isSpace && width > maxWidthPx) {
+				units.push(...breakOversizedWord(part, measurer.measureText, maxWidthPx));
+				continue;
+			}
+
 			units.push({
 				kind: isSpace ? 'space' : 'word',
 				text: part,
-				width: measurer.measureText(part),
+				width,
 			});
 		}
 	}

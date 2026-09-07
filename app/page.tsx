@@ -63,6 +63,8 @@ type LambdaProgress = {
 };
 
 const POLL_INTERVAL_MS = 1500;
+/** Grace period before releasing a blob URL, so the download it started can read it. */
+const REVOKE_DELAY_MS = 60_000;
 
 const THEME_OPTIONS: {value: ThemeName; label: string}[] = [
 	{value: 'none', label: 'None (classic black)'},
@@ -252,12 +254,27 @@ export default function Page() {
 							const blob = base64ToBlob(event.dataBase64, 'video/mp4');
 							const url = URL.createObjectURL(blob);
 							downloadUrl(url, 'ig-dm-reel.mp4');
-							URL.revokeObjectURL(url);
+							// Revoking synchronously races the download the click
+							// just started: the browser may not have read the blob
+							// yet, and the save silently fails. Let the click settle
+							// first — the object URL still gets released.
+							setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
 							finished = true;
 						} else if (event.type === 'error') {
 							throw new Error(event.error);
 						}
 					}
+				}
+
+				// The stream can end without ever delivering `done` or `error` —
+				// a dropped connection, or the serverless function hitting its own
+				// duration limit part-way through a long render. Without this the
+				// loop just falls through: no video, no message, and the progress
+				// UI resets as if the render had succeeded.
+				if (!finished) {
+					throw new Error(
+						'The render stopped before it finished — the connection closed early. Try a shorter script, or configure Remotion Lambda so renders are not bound by one request.',
+					);
 				}
 			}
 		} catch (err) {

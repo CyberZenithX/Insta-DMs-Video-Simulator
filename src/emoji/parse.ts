@@ -1,4 +1,5 @@
 import emojiRegex from 'emoji-regex';
+import {VENDORED_EMOJI_FILES} from './config';
 
 export type TextToken = {type: 'text'; value: string};
 export type EmojiToken = {
@@ -32,19 +33,40 @@ export const parseMessageText = (text: string): MessageToken[] => {
 	const tokens: MessageToken[] = [];
 	let lastIndex = 0;
 
+	// An emoji with no vendored PNG falls back to a text token rather than
+	// being pointed at an asset that 404s (see VENDORED_EMOJI_FILES). Merging
+	// it into the neighbouring text keeps word-wrapping intact: "a🙂b" has to
+	// stay one wrap unit, exactly as it would if no emoji were involved.
+	const pushText = (value: string) => {
+		if (value === '') return;
+		const last = tokens[tokens.length - 1];
+		if (last && last.type === 'text') {
+			last.value += value;
+			return;
+		}
+		tokens.push({type: 'text', value});
+	};
+
 	for (const match of text.matchAll(regex)) {
 		const index = match.index ?? 0;
 		if (index > lastIndex) {
-			tokens.push({type: 'text', value: text.slice(lastIndex, index)});
+			pushText(text.slice(lastIndex, index));
 		}
 		const value = match[0];
 		const codepoints = Array.from(value).map((ch) => ch.codePointAt(0) ?? 0);
-		tokens.push({type: 'emoji', value, codepoints, file: toNotoFile(codepoints)});
+		const file = toNotoFile(codepoints);
+
+		if (VENDORED_EMOJI_FILES.has(file)) {
+			tokens.push({type: 'emoji', value, codepoints, file});
+		} else {
+			pushText(value);
+		}
+
 		lastIndex = index + value.length;
 	}
 
 	if (lastIndex < text.length) {
-		tokens.push({type: 'text', value: text.slice(lastIndex)});
+		pushText(text.slice(lastIndex));
 	}
 
 	return tokens;
