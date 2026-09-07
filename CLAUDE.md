@@ -23,7 +23,7 @@ npm run lambda:deploy-site       # bundle src/ and upload it to S3; run again af
 
 `/api/render` reads a pre-built bundle from `remotion-bundle/` on disk. If that directory is missing the route returns a 500 telling you to build. After changing anything under `src/`, re-run `npm run bundle:remotion` or the API will keep serving the stale bundle — the Next dev server will not pick up composition changes on its own. **This bundle is only used by local-render mode** — Lambda mode reads the separately-deployed S3 site instead, so a `src/` change also needs `npm run lambda:deploy-site` re-run before it shows up there.
 
-The three `lambda:*` scripts need `REMOTION_AWS_ACCESS_KEY_ID`/`REMOTION_AWS_SECRET_ACCESS_KEY` set in the shell (an IAM user with the policy from `lambda:print-policies`) — never commit these. See `spec.md` → "Environment variables (Lambda mode)" for the full list of what the deployed app itself needs.
+The three `lambda:*` scripts need `REMOTION_AWS_ACCESS_KEY_ID`/`REMOTION_AWS_SECRET_ACCESS_KEY` set in the shell (an IAM user with the policy from `lambda:print-policies`) — never commit these. See `spec.md` → "Environment variables (Lambda mode)" for the full list of what the deployed app itself needs, or `AWS_LAMBDA_SETUP.md` for the full step-by-step account setup (doubles as an AWS primer).
 
 ### There are no tests
 

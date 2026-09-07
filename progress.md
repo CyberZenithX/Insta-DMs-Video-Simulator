@@ -32,7 +32,7 @@ What's *not* verified because it requires a real AWS account this sandbox doesn'
 | PR #2 | [merged](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/2) — typing fix + avatar-path fix |
 | PR #3 | [merged](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/3) — compositor-binaries fix, browser-launch fix, receiver-name validation fix, session docs |
 | PR #4 | [merged](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/4) — streamed render progress + the shared-browser speed fix |
-| PR #5 | **not yet opened** — Remotion Lambda backend, this round's work. Code complete and pushed to the branch; open it before merging. |
+| PR #5 | **[open](https://github.com/CyberZenithX/Insta-DMs-Video-Simulator/pull/5)**, not yet merged — Remotion Lambda backend |
 | Working tree | clean, everything pushed |
 
 **Before starting new work: check whether the branch's most recent PR has merged.** If it has and you need to push to this branch again, rebase onto current `main` first — do not push onto the old head. This has now happened three times (after PR #1, PR #2, and PR #3); see `decisions.md` → "The branch keeps getting reused after its PR merges."
@@ -41,13 +41,11 @@ What's *not* verified because it requires a real AWS account this sandbox doesn'
 
 This is a two-track next step — the AWS side needs a human with an AWS account (or credentials handed to a session that can act on them), the deploy side is otherwise fully scripted:
 
-1. **Get AWS credentials.** Create an IAM user, attach the policy from `npm run lambda:print-policies` (the "user policy" half), generate access keys. Separately, create an IAM role named exactly `remotion-lambda-role` with the "role policy" half of that same script's output, trusted by `lambda.amazonaws.com`.
-2. **Run the two deploy scripts** with `REMOTION_AWS_ACCESS_KEY_ID`/`REMOTION_AWS_SECRET_ACCESS_KEY` set: `npm run lambda:deploy-function` then `npm run lambda:deploy-site`. Each prints the env vars the app needs.
-3. **Set those env vars on Vercel** (`REMOTION_LAMBDA_FUNCTION_NAME`, `REMOTION_LAMBDA_SERVE_URL`, `REMOTION_LAMBDA_REGION`, plus the two `REMOTION_AWS_*` credential vars) and redeploy.
-4. **Click Generate MP4 on the live site.** This is the first real end-to-end test of the entire Lambda path — deploy, trigger, poll, download — none of which has run against real infrastructure yet.
-5. Separately, still unconfirmed from the last two rounds and not superseded by this one: the browser-launch fix and the streamed-progress fallback both still only matter if Lambda *isn't* configured, or if step 1–4 above hasn't happened yet. If this deployment ships without AWS set up, those are still the open questions — see the PR #3/#4 history in git log for what they were.
+1. **Follow `AWS_LAMBDA_SETUP.md`** — the full runbook (create the IAM user/role, generate keys, run the two deploy scripts, set Vercel env vars). It's written to double as an AWS primer, not just a checklist; the steps below are the condensed version.
+2. **Click Generate MP4 on the live site** once that's done. This is the first real end-to-end test of the entire Lambda path — deploy, trigger, poll, download — none of which has run against real infrastructure yet.
+3. Separately, still unconfirmed from the last two rounds and not superseded by this one: the browser-launch fix and the streamed-progress fallback both still only matter if Lambda *isn't* configured, or if step 1 above hasn't happened yet. If this deployment ships without AWS set up, those are still the open questions — see the PR #3/#4 history in git log for what they were.
 
-If a session with real (ideally scoped/temporary) AWS credentials picks this up, steps 1–4 can be done directly rather than handed to a human — the deploy scripts and routes are already written and waiting.
+If a session with real (ideally scoped/temporary) AWS credentials picks this up, `AWS_LAMBDA_SETUP.md`'s steps can be done directly rather than handed to a human — the deploy scripts and routes are already written and waiting.
 
 ## Done and verified
 
