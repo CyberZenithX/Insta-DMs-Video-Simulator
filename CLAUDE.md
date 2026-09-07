@@ -6,6 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A fake-Instagram-DM **Reel generator**. `src/` is a Remotion project that animates a scripted DM conversation as a 1080×1920 video; `app/` is a Next.js UI wrapped around it (live preview + a "Generate MP4" button that renders server-side). Deploy target is Vercel. Actual rendering happens one of two ways — see "Two render backends" below.
 
+## Working agreement: touching `src/`
+
+The user is running Remotion Lambda in production, deployed from a manual snapshot (`npm run lambda:deploy-site`), not a live connection to this repo — see "Two render backends" below. That means any change under `src/` (or `public/`) leaves the deployed Lambda site stale until they re-run a command themselves in their own terminal (this session cannot do it for them: it needs their AWS credentials, which are never to be committed or requested here).
+
+So:
+- **Ask before editing anything under `src/` or `public/`.** Don't make the change first and mention it after.
+- **Once a change under `src/`/`public/` is made and pushed**, always tell the user the exact command to run afterward:
+  - Composition/asset change only → `npm run lambda:deploy-site -- --region=<their region>`
+  - Also bumped the `@remotion/lambda`/`remotion` version, or changed `scripts/lambda-deploy-function.mjs`'s memory/timeout/disk settings → `npm run lambda:deploy-function` too (both need `REMOTION_AWS_ACCESS_KEY_ID`/`REMOTION_AWS_SECRET_ACCESS_KEY` set in their shell — never ask for or commit these).
+- This doesn't apply to `app/` — that ships via their normal Vercel deploy, not a manual AWS step.
+
 ## Commands
 
 ```bash
@@ -93,7 +104,7 @@ Lambda deploys are managed by `scripts/lambda-deploy-function.mjs` / `scripts/la
 
 These only apply when local-render mode is in play — either because Lambda isn't configured, or because you're running `npm run dev`. They're all fixes for real failures; changing them will break the build or the render:
 
-1. **Anything imported by `app/api/render/route.ts` must not import the `remotion` React barrel.** That's why `src/data/defaultProps.ts` hardcodes `'/avatar-demo.svg'` instead of calling `staticFile()`. Violating this fails the Next server build with `React.createContext is undefined`.
+1. **Anything imported by `app/api/render/route.ts` must not import the `remotion` React barrel.** That's why `src/data/defaultProps.ts` stores the receiver's avatar as a bare public/-relative filename (`avatar-demo.svg`) instead of calling `staticFile()` on it directly — `staticFile()` is applied once, downstream, in `DmHeader.tsx` (browser context, safe to import `remotion`), since it's the one thing that resolves correctly under every context that value flows through, Lambda's `sites/<name>/`-prefixed S3 site included. A hardcoded root-relative path (e.g. `/avatar-demo.svg`) looks correct locally but 404s on Lambda, where it resolves against the bucket root instead of the site's own prefix. Violating the no-`remotion`-import rule itself fails the Next server build with `React.createContext is undefined`.
 2. **`serverComponentsExternalPackages`** (`next.config.js`) keeps `@remotion/renderer` and `@sparticuz/chromium` out of webpack — bundling mangles their CDP/websocket and native code.
 3. **`scripts/bundle-remotion.mjs` flattens `public/` into the bundle root.** `bundle()` nests assets under `public/`, but a local-directory `serveUrl` is served verbatim at root while `staticFile()` returns unprefixed paths. Without the flatten, every asset 404s at render time.
 4. **`outputFileTracingIncludes`** keeps Vercel from pruning two things out of the deployed function: `remotion-bundle/`, and Remotion's **compositor binaries**. The compositor package's `index.js` is only `exports.dir = __dirname` — the renderer requires it to get a directory, then reads `remotion`, `ffmpeg`, and ~22MB of `libav*.so` from that path at runtime. The tracer keeps the JS shim and prunes every binary, and the function dies with `ENOENT ... /compositor-linux-x64-gnu/remotion`.
