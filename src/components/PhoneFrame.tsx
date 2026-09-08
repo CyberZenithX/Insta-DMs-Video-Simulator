@@ -1,8 +1,8 @@
 import React from 'react';
 import {StatusBar} from './StatusBar';
 import {DmHeader} from './DmHeader';
-import {layout, colors} from '../tokens';
-import {computeChromeHeightPx, computeHeaderStartPx} from '../lib/chrome';
+import {colors} from '../tokens';
+import {computeChromeHeightPx, computeChromeStartPx} from '../lib/chrome';
 import type {IgDmReelProps, SafeZones} from '../types';
 
 export const PhoneFrame: React.FC<{
@@ -14,8 +14,7 @@ export const PhoneFrame: React.FC<{
 	safeZones: SafeZones;
 	children: React.ReactNode;
 }> = ({frameWidthPx, frameHeightPx, receiver, clock, backgroundCss, safeZones, children}) => {
-	const statusBarHeightPx = frameWidthPx * layout.statusBarHeight;
-	const headerStartPx = computeHeaderStartPx(frameWidthPx, frameHeightPx, safeZones);
+	const chromeStartPx = computeChromeStartPx(frameHeightPx, safeZones);
 	const chromeHeightPx = computeChromeHeightPx(frameWidthPx, frameHeightPx, safeZones);
 
 	return (
@@ -30,11 +29,13 @@ export const PhoneFrame: React.FC<{
 				background: backgroundCss ?? colors.chatBackground,
 			}}
 		>
-			<StatusBar frameWidthPx={frameWidthPx} clock={clock} />
 			{/* Blank space clearing Instagram's own Reels-viewer chrome — see
-			    computeHeaderStartPx. Nothing to paint here: PhoneFrame's own
-			    background above already shows through. */}
-			<div style={{height: headerStartPx - statusBarHeightPx}} />
+			    computeChromeStartPx. Nothing to paint here: PhoneFrame's own
+			    background above already shows through. Both the status bar and
+			    the header sit below this, not just the header — Instagram's
+			    overlay covers the whole top band, not only where the header is. */}
+			<div style={{height: chromeStartPx}} />
+			<StatusBar frameWidthPx={frameWidthPx} clock={clock} />
 			<DmHeader frameWidthPx={frameWidthPx} receiver={receiver} />
 			<div
 				style={{
