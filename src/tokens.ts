@@ -64,6 +64,15 @@ export const geometry = {
 	 */
 	reactionBadgeSize: 0.09,
 	reactionBadgeInset: 0.32,
+	/**
+	 * How far above its anchor point (the target bubble's bottom edge) a
+	 * reaction badge's own top sits, as a fraction of the badge's size — so
+	 * the remaining `1 - this` fraction is how far the badge hangs *below*
+	 * that edge. The stack layout needs this too: a reacted bubble needs
+	 * extra room reserved after it, or the next bubble in the stack lands
+	 * right on top of the badge (see the `bubbleGap` usage in timeline.ts).
+	 */
+	reactionBadgeVerticalOffset: 0.55,
 } as const;
 
 /**

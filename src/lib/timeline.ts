@@ -34,6 +34,15 @@ export type Slot = {
 	id: string;
 	from: 'me' | 'them';
 	phases: Phase[];
+	/**
+	 * Whether a reaction event targets this slot, anywhere in the script —
+	 * not whether one is currently visible on screen. Known up front from the
+	 * event list, so the stack can reserve room for the badge's overhang from
+	 * the moment this slot is created, rather than the next bubble jumping
+	 * down the instant the reaction pops in (nothing would drive that jump
+	 * with a spring, unlike every other layout change here).
+	 */
+	hasReaction: boolean;
 };
 
 /**
@@ -59,6 +68,10 @@ export const buildSlots = (
 	safeZones: SafeZones,
 ): Slot[] => {
 	const sorted = [...events].sort((a, b) => a.startSec - b.startSec);
+
+	const reactedMessageIds = new Set(
+		sorted.filter((ev): ev is Extract<TimelineEvent, {type: 'reaction'}> => ev.type === 'reaction').map((ev) => ev.targetId),
+	);
 
 	const nextMessageIndex = (afterIndex: number): number => {
 		for (let j = afterIndex + 1; j < sorted.length; j++) {
@@ -107,9 +120,11 @@ export const buildSlots = (
 			paddingVPx: layout.paddingVPx,
 		};
 
+		const hasReaction = reactedMessageIds.has(ev.id);
+
 		const typing = typingForMessage.get(i);
 		if (!typing) {
-			slots.push({id: ev.id, from: ev.from, phases: [messagePhase]});
+			slots.push({id: ev.id, from: ev.from, phases: [messagePhase], hasReaction});
 			return;
 		}
 
@@ -121,6 +136,7 @@ export const buildSlots = (
 				{kind: 'typing', frame: Math.round(typing.startSec * fps), widthPx, heightPx},
 				messagePhase,
 			],
+			hasReaction,
 		});
 	});
 
@@ -182,6 +198,11 @@ export const computeFrameLayout = (
 	springConfig: SpringConfig,
 ): FrameLayout => {
 	const gapPx = frameWidthPx * geometry.bubbleGap;
+	// How far a reaction badge hangs below its target bubble's bottom edge
+	// (see ReactionBadge.tsx) — reserved as extra room after any slot a
+	// reaction targets, or the next bubble in the stack lands on top of it.
+	const reactionOverhangPx =
+		frameWidthPx * geometry.reactionBadgeSize * (1 - geometry.reactionBadgeVerticalOffset);
 
 	type GlobalEvent = {frame: number; slotIndex: number; phaseIndex: number};
 	const globalEvents: GlobalEvent[] = [];
@@ -234,7 +255,7 @@ export const computeFrameLayout = (
 
 		const top = cursorTop;
 		const bottom = top + heightPx;
-		cursorTop = bottom + gapPx;
+		cursorTop = bottom + gapPx + (slot.hasReaction ? reactionOverhangPx : 0);
 
 		const phase = slot.phases[curPhaseIdx];
 		const prevPhase = curPhaseIdx > 0 ? slot.phases[curPhaseIdx - 1] : null;
@@ -284,7 +305,7 @@ export const computeFrameLayout = (
 
 			const bTop = top;
 			const bBottom = bTop + h;
-			top = bBottom + gapPx;
+			top = bBottom + gapPx + (slot.hasReaction ? reactionOverhangPx : 0);
 			lastBottom = bBottom;
 			any = true;
 		}

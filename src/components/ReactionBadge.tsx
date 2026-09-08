@@ -18,7 +18,7 @@ export const ReactionBadge: React.FC<{reaction: ReactionRender; side: 'me' | 'th
 			style={{
 				position: 'absolute',
 				left,
-				top: reaction.y - reaction.sizePx * 0.55,
+				top: reaction.y - reaction.sizePx * geometry.reactionBadgeVerticalOffset,
 				width: reaction.sizePx,
 				height: reaction.sizePx,
 				borderRadius: '50%',
