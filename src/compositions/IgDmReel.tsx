@@ -20,7 +20,7 @@ export const calculateIgDmReelMetadata: CalculateMetadataFunction<IgDmReelProps>
 };
 
 export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
-	const {events, receiver, clock, background, theme, scrollAnchor, spring: springConfig} = props;
+	const {events, receiver, clock, background, theme, scrollAnchor, spring: springConfig, safeZones} = props;
 	const frame = useCurrentFrame();
 	const {width, height, fps} = useVideoConfig();
 	const fontReady = useInterFontReady();
@@ -44,8 +44,8 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 
 	const slots = useMemo(() => {
 		if (!fontReady) return [];
-		return buildSlots(events, fps, phoneWidthPx);
-	}, [events, fps, phoneWidthPx, fontReady]);
+		return buildSlots(events, fps, phoneWidthPx, safeZones);
+	}, [events, fps, phoneWidthPx, fontReady, safeZones]);
 
 	const chromeHeightPx = phoneWidthPx * (layout.statusBarHeight + layout.headerHeight);
 	const chatViewportHeightPx = height - chromeHeightPx;
@@ -56,8 +56,8 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 	);
 
 	const reactions = useMemo(
-		() => computeReactions(reactionEvents, frameLayout, frame, fps, phoneWidthPx),
-		[reactionEvents, frameLayout, frame, fps, phoneWidthPx],
+		() => computeReactions(reactionEvents, frameLayout, frame, fps, phoneWidthPx, safeZones),
+		[reactionEvents, frameLayout, frame, fps, phoneWidthPx, safeZones],
 	);
 
 	if (!fontReady) {
@@ -84,6 +84,7 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 						chatViewportHeightPx={chatViewportHeightPx}
 						scrollOffsetPx={frameLayout.scrollOffsetPx}
 						gradientStops={bubbleGradientStops}
+						safeZones={safeZones}
 					/>
 				))}
 				{reactions.map((reaction) => (

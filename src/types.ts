@@ -75,6 +75,8 @@ export const safeZonesSchema = z.object({
 	bottomStart: z.number().min(0).max(1),
 });
 
+export type SafeZones = z.infer<typeof safeZonesSchema>;
+
 export const springConfigSchema = z.object({
 	damping: z.number().min(0),
 	mass: z.number().min(0.01),

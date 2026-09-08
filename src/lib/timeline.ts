@@ -1,5 +1,5 @@
 import {spring} from 'remotion';
-import type {TimelineEvent, TypingEvent, SpringConfig as SpringConfigType} from '../types';
+import type {TimelineEvent, TypingEvent, SpringConfig as SpringConfigType, SafeZones} from '../types';
 import {computeBubbleLayout, typingBubbleSize} from './bubbleLayout';
 import {geometry} from '../tokens';
 import {lerp} from './math';
@@ -52,7 +52,12 @@ export type Slot = {
  * from `me`, which both stranded dots bubbles mid-stack and let a much later
  * `them` message merge into a stale slot and render out of order.
  */
-export const buildSlots = (events: TimelineEvent[], fps: number, frameWidthPx: number): Slot[] => {
+export const buildSlots = (
+	events: TimelineEvent[],
+	fps: number,
+	frameWidthPx: number,
+	safeZones: SafeZones,
+): Slot[] => {
 	const sorted = [...events].sort((a, b) => a.startSec - b.startSec);
 
 	const nextMessageIndex = (afterIndex: number): number => {
@@ -88,7 +93,7 @@ export const buildSlots = (events: TimelineEvent[], fps: number, frameWidthPx: n
 	sorted.forEach((ev, i) => {
 		if (ev.type !== 'message') return;
 
-		const layout = computeBubbleLayout(ev.text, frameWidthPx);
+		const layout = computeBubbleLayout(ev.text, frameWidthPx, ev.from, safeZones);
 		const messagePhase: MessagePhase = {
 			kind: 'message',
 			frame: Math.round(ev.startSec * fps),
@@ -295,10 +300,21 @@ export const computeFrameLayout = (
 	return {rows, scrollOffsetPx};
 };
 
-/** Horizontal [left, right] extent of a row's bubble in frame-pixel space. */
-export const bubbleXRange = (row: RenderRow, frameWidthPx: number): [number, number] => {
+/**
+ * Horizontal [left, right] extent of a row's bubble in frame-pixel space.
+ *
+ * A sent bubble is right-anchored — its width grows leftward from a fixed
+ * right edge — so keeping it clear of the icon rail means capping that
+ * anchor's position, not its width (which is already safely inside
+ * `maxBubbleWidth`; see `computeBubbleLayout`). A received bubble is the
+ * opposite: left-anchored, so its width is what was already capped upstream
+ * to keep its (derived) right edge clear — nothing to clamp here.
+ */
+export const bubbleXRange = (row: RenderRow, frameWidthPx: number, safeZones: SafeZones): [number, number] => {
 	if (row.from === 'me') {
-		const right = frameWidthPx * (1 - geometry.sentRightMargin);
+		const uncappedRight = frameWidthPx * (1 - geometry.sentRightMargin);
+		const safeRightEdgePx = frameWidthPx * safeZones.railX - frameWidthPx * geometry.safeEdgeClearance;
+		const right = Math.min(uncappedRight, safeRightEdgePx);
 		return [right - row.widthPx, right];
 	}
 	const left = frameWidthPx * geometry.receivedLeftOffset;

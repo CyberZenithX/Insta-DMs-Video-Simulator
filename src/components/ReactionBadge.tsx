@@ -2,6 +2,7 @@ import React from 'react';
 import type {ReactionRender} from '../lib/reactions';
 import {parseMessageText} from '../emoji/parse';
 import {EmojiImage} from '../emoji/EmojiText';
+import {geometry} from '../tokens';
 
 export const ReactionBadge: React.FC<{reaction: ReactionRender; side: 'me' | 'them'}> = ({
 	reaction,
@@ -9,7 +10,7 @@ export const ReactionBadge: React.FC<{reaction: ReactionRender; side: 'me' | 'th
 }) => {
 	const tokens = parseMessageText(reaction.emoji);
 	const emojiToken = tokens.find((t) => t.type === 'emoji');
-	const inset = reaction.sizePx * 0.32;
+	const inset = reaction.sizePx * geometry.reactionBadgeInset;
 	const left = side === 'me' ? reaction.x - reaction.sizePx + inset : reaction.x - inset;
 
 	return (
