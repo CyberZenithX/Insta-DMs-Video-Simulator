@@ -19,9 +19,17 @@ import type {IgDmReelProps} from '../types';
 
 export const defaultAvatarFile = 'avatar-demo.svg';
 
+// railX was re-measured against a real posted Reel (a screenshot of this
+// app's own output, viewed on Instagram) rather than trusted as originally
+// estimated: the heart/comment/share icons' own leftmost pixels sit at
+// x=961/965/962 of a 1080-wide frame (0.890/0.893/0.891) — comfortably
+// right of the previous 0.79, which was costing sent bubbles ~125px of
+// real, safe width for no reason. Using the minimum (0.890) of the three,
+// the widest/leftmost-reaching icon decides the boundary, not an average
+// that could still let some other icon poke past it.
 export const defaultSafeZones = {
 	topEnd: 0.06,
-	railX: 0.79,
+	railX: 0.89,
 	railTop: 0.38,
 	railBottom: 0.96,
 	bottomStart: 0.82,
