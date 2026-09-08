@@ -5,7 +5,8 @@ import type {IgDmReelProps, ReactionEvent} from '../types';
 import {useInterFontReady} from '../lib/font';
 import {buildSlots, computeFrameLayout, lastActiveFrame} from '../lib/timeline';
 import {computeReactions} from '../lib/reactions';
-import {layout, colors, sentGradientStops} from '../tokens';
+import {computeChromeHeightPx} from '../lib/chrome';
+import {colors, sentGradientStops} from '../tokens';
 import {themeGradients, themeBackgroundCss, themeBubbleStops} from '../themes';
 import {FPS, WIDTH, HEIGHT} from '../constants';
 import {Background} from '../components/Background';
@@ -33,8 +34,10 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 	// The mockup is a full-bleed screen recording: all phone-interior
 	// geometry (§3) was measured as ratios of the real screenshot's own
 	// width (1080px, see tokens.ts), so it's sized off the full frame
-	// width, not a cropped-in window. The safeZones props stay purely
-	// informational (SafeZoneGrid) rather than shrinking the canvas.
+	// width, not a cropped-in window. safeZones now also constrains where
+	// bubbles and the header can sit (see bubbleLayout.ts, timeline.ts,
+	// lib/chrome.ts) — but only ever repositions content within the full
+	// canvas, never shrinks the canvas itself.
 	const phoneWidthPx = width;
 
 	const bubbleGradientStops =
@@ -47,7 +50,7 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 		return buildSlots(events, fps, phoneWidthPx, safeZones);
 	}, [events, fps, phoneWidthPx, fontReady, safeZones]);
 
-	const chromeHeightPx = phoneWidthPx * (layout.statusBarHeight + layout.headerHeight);
+	const chromeHeightPx = computeChromeHeightPx(phoneWidthPx, height, safeZones);
 	const chatViewportHeightPx = height - chromeHeightPx;
 
 	const frameLayout = useMemo(
@@ -73,6 +76,7 @@ export const IgDmReel: React.FC<IgDmReelProps> = (props) => {
 				receiver={receiver}
 				clock={clock}
 				backgroundCss={chatBackgroundCss}
+				safeZones={safeZones}
 			>
 				{frameLayout.rows.map((row) => (
 					<Bubble

@@ -2,7 +2,8 @@ import React from 'react';
 import {StatusBar} from './StatusBar';
 import {DmHeader} from './DmHeader';
 import {layout, colors} from '../tokens';
-import type {IgDmReelProps} from '../types';
+import {computeChromeHeightPx, computeHeaderStartPx} from '../lib/chrome';
+import type {IgDmReelProps, SafeZones} from '../types';
 
 export const PhoneFrame: React.FC<{
 	frameWidthPx: number;
@@ -10,9 +11,12 @@ export const PhoneFrame: React.FC<{
 	receiver: IgDmReelProps['receiver'];
 	clock: string;
 	backgroundCss?: string;
+	safeZones: SafeZones;
 	children: React.ReactNode;
-}> = ({frameWidthPx, frameHeightPx, receiver, clock, backgroundCss, children}) => {
-	const chromeHeightPx = frameWidthPx * (layout.statusBarHeight + layout.headerHeight);
+}> = ({frameWidthPx, frameHeightPx, receiver, clock, backgroundCss, safeZones, children}) => {
+	const statusBarHeightPx = frameWidthPx * layout.statusBarHeight;
+	const headerStartPx = computeHeaderStartPx(frameWidthPx, frameHeightPx, safeZones);
+	const chromeHeightPx = computeChromeHeightPx(frameWidthPx, frameHeightPx, safeZones);
 
 	return (
 		<div
@@ -27,6 +31,10 @@ export const PhoneFrame: React.FC<{
 			}}
 		>
 			<StatusBar frameWidthPx={frameWidthPx} clock={clock} />
+			{/* Blank space clearing Instagram's own Reels-viewer chrome — see
+			    computeHeaderStartPx. Nothing to paint here: PhoneFrame's own
+			    background above already shows through. */}
+			<div style={{height: headerStartPx - statusBarHeightPx}} />
 			<DmHeader frameWidthPx={frameWidthPx} receiver={receiver} />
 			<div
 				style={{

@@ -40,19 +40,31 @@ export const defaultAvatarFile = 'avatar-demo.svg';
 //   existing value already has slack rather than being wrong.
 //
 // Note railTop/railBottom are consumed only by SafeZoneGrid's calibration
-// overlay right now — the bubble-clearance fix in bubbleLayout.ts/
-// timeline.ts constrains horizontal position unconditionally (regardless of
-// vertical position), not only within [railTop, railBottom]. So this
-// correction fixes the calibration reference itself; it doesn't by itself
-// change what a bubble is allowed to do. Making the horizontal constraint
-// apply *only* within this vertical band (freeing up full width above/
-// below it) is a separate, larger change with a real tradeoff — bubble
-// width would stop being a fixed, frame-independent fact about a message
-// and start depending on scroll position, which is exactly what "Text
-// measurement gates rendering" (CLAUDE.md) and the measured-once layout
-// pipeline currently assume never happens.
+// overlay — the bubble-clearance fix in bubbleLayout.ts/timeline.ts
+// constrains horizontal position unconditionally (regardless of vertical
+// position), not only within [railTop, railBottom]. So this correction
+// fixes the calibration reference itself; it doesn't by itself change what
+// a bubble is allowed to do. Making the horizontal constraint apply *only*
+// within this vertical band (freeing up full width above/below it) is a
+// separate, larger change with a real tradeoff — bubble width would stop
+// being a fixed, frame-independent fact about a message and start
+// depending on scroll position, which is exactly what "Text measurement
+// gates rendering" (CLAUDE.md) and the measured-once layout pipeline
+// currently assume never happens.
+//
+// topEnd, unlike railTop/railBottom, IS load-bearing: lib/chrome.ts uses it
+// to push DmHeader down clear of Instagram's own Reels-viewer chrome (back
+// arrow, title, icons — a fixed overlay on top of a posted Reel). Bumped
+// from 0.06 to 0.062 to match the same screenshot: that overlay's real
+// bottom edge sits at 0.057 of frame height (screenshot y 144-205, minus
+// the video's own top-edge offset), and the previous 0.06 was already
+// close, just measured before this specific overlap was found. Before this
+// fix, DmHeader started right after the status bar (~0.045) regardless —
+// well inside the overlay — so the sender's name and avatar rendered
+// directly underneath "Reels" on an actual posted video, even though they
+// were visible in a bare render.
 export const defaultSafeZones = {
-	topEnd: 0.06,
+	topEnd: 0.062,
 	railX: 0.89,
 	railTop: 0.505,
 	railBottom: 0.96,
