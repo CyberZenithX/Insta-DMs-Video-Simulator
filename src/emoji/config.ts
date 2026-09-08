@@ -27,3 +27,17 @@ export const VENDORED_EMOJI_FILES: ReadonlySet<string> = new Set([
 	'emoji_u1f602', // 😂
 	'emoji_u1f937', // 🤷
 ]);
+
+/**
+ * Display form of the same set — actual emoji characters, for a UI picker
+ * (the reaction picker in app/page.tsx, and the request-body validation in
+ * src/types.ts) that wants something to show and pick rather than a
+ * filename. A reaction badge with an un-vendored emoji doesn't fail the
+ * render the way an inline message emoji does (ReactionBadge just renders an
+ * empty circle), but it's a UI bug either way — so this list is what's
+ * actually offered as choices, not merely what's *allowed*.
+ *
+ * Keep in exact sync with VENDORED_EMOJI_FILES above: same five emoji, same
+ * count, every entry here has a corresponding file there and vice versa.
+ */
+export const VENDORED_REACTION_EMOJIS = ['👀', '💀', '🔥', '😂', '🤷'] as const;

@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import {zColor} from '@remotion/zod-types';
+import {VENDORED_REACTION_EMOJIS} from './emoji/config';
 
 export const messageEventSchema = z.object({
 	type: z.literal('message'),
@@ -109,10 +110,25 @@ export const safeZoneGridPropsSchema = z.object({
 
 export type SafeZoneGridProps = z.infer<typeof safeZoneGridPropsSchema>;
 
+/**
+ * A reaction is restricted to the vendored set, not any emoji, so the web
+ * UI's picker and the request body agree on what a message can actually
+ * show — an un-vendored reaction doesn't fail the render (unlike an
+ * un-vendored emoji inline in message text), it just renders as an empty
+ * badge, which is exactly the kind of bug this schema exists to rule out
+ * before it reaches the composition at all.
+ */
+export const reactionEmojiSchema = z
+	.string()
+	.refine((v) => (VENDORED_REACTION_EMOJIS as readonly string[]).includes(v), {
+		message: `Reaction must be one of: ${VENDORED_REACTION_EMOJIS.join(' ')}`,
+	});
+
 /** Request body for POST /api/render — a simplified script, not the full IgDmReelProps. */
 export const scriptMessageSchema = z.object({
 	from: z.enum(['me', 'them']),
 	text: z.string().min(1).max(280),
+	reaction: reactionEmojiSchema.optional(),
 });
 
 export const generateRequestSchema = z.object({
