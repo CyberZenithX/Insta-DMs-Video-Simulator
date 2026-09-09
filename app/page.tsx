@@ -9,8 +9,9 @@ import {baseIgDmReelProps, defaultClock, defaultReceiver} from '../src/data/defa
 import {FPS, WIDTH, HEIGHT} from '../src/constants';
 import type {ThemeName} from '../src/themes';
 import type {IgDmReelProps} from '../src/types';
+import {VENDORED_REACTION_EMOJIS} from '../src/emoji/config';
 
-type ScriptMessage = {id: string; from: 'me' | 'them'; text: string};
+type ScriptMessage = {id: string; from: 'me' | 'them'; text: string; reaction?: string};
 
 type RenderStage = 'launching' | 'resolving' | 'rendering' | 'stitching' | 'done';
 
@@ -85,7 +86,7 @@ const newId = () => `msg-${nextId++}`;
 const INITIAL_MESSAGES: ScriptMessage[] = [
 	{id: newId(), from: 'them', text: 'yo have you seen this'},
 	{id: newId(), from: 'me', text: 'seen what 👀'},
-	{id: newId(), from: 'them', text: "it's actually insane"},
+	{id: newId(), from: 'them', text: "it's actually insane", reaction: '😂'},
 	{id: newId(), from: 'me', text: "no way, send it"},
 ];
 
@@ -103,7 +104,7 @@ export default function Page() {
 	const [etaMs, setEtaMs] = useState<number | null>(null);
 
 	const events = useMemo(
-		() => buildEventsFromScript(messages.map(({from, text}) => ({from, text}))),
+		() => buildEventsFromScript(messages.map(({from, text, reaction}) => ({from, text, reaction}))),
 		[messages],
 	);
 
@@ -165,7 +166,7 @@ export default function Page() {
 					receiverName: receiverName.trim() || defaultReceiver.name,
 					receiverUsername,
 					clock,
-					messages: messages.map(({from, text}) => ({from, text})),
+					messages: messages.map(({from, text, reaction}) => ({from, text, reaction})),
 				}),
 			});
 
@@ -355,6 +356,19 @@ export default function Page() {
 								maxLength={280}
 								style={{flex: 1, resize: 'vertical'}}
 							/>
+							<select
+								value={m.reaction ?? ''}
+								onChange={(e) => updateMessage(m.id, {reaction: e.target.value || undefined})}
+								style={{width: 52, flexShrink: 0}}
+								aria-label="Reaction"
+							>
+								<option value="">—</option>
+								{VENDORED_REACTION_EMOJIS.map((emoji) => (
+									<option key={emoji} value={emoji}>
+										{emoji}
+									</option>
+								))}
+							</select>
 							<button
 								onClick={() => removeMessage(m.id)}
 								disabled={messages.length <= 1}

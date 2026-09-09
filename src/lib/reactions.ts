@@ -1,7 +1,8 @@
 import {spring} from 'remotion';
-import type {ReactionEvent} from '../types';
+import type {ReactionEvent, SafeZones} from '../types';
 import type {FrameLayout} from './timeline';
 import {bubbleXRange} from './timeline';
+import {geometry} from '../tokens';
 
 export type ReactionRender = {
 	id: string;
@@ -29,8 +30,9 @@ export const computeReactions = (
 	frame: number,
 	fps: number,
 	frameWidthPx: number,
+	safeZones: SafeZones,
 ): ReactionRender[] => {
-	const sizePx = frameWidthPx * 0.09;
+	const sizePx = frameWidthPx * geometry.reactionBadgeSize;
 	const results: ReactionRender[] = [];
 
 	for (const ev of reactionEvents) {
@@ -40,7 +42,7 @@ export const computeReactions = (
 		const row = frameLayout.rows.find((r) => r.id === ev.targetId);
 		if (!row) continue;
 
-		const [left, right] = bubbleXRange(row, frameWidthPx);
+		const [left, right] = bubbleXRange(row, frameWidthPx, safeZones);
 		const x = row.from === 'me' ? left : right;
 		const y = row.bottom - frameLayout.scrollOffsetPx;
 

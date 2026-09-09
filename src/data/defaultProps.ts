@@ -19,10 +19,54 @@ import type {IgDmReelProps} from '../types';
 
 export const defaultAvatarFile = 'avatar-demo.svg';
 
+// railX/railTop were re-measured against a real posted Reel (a screenshot
+// of this app's own output, viewed on Instagram) rather than trusted as
+// originally estimated, using the video's own top edge (found by scanning
+// for the black-OS-chrome-to-content transition) as the pixel origin, and
+// cross-checked against where this composition's own clock text landed
+// relative to it before trusting anything derived from that origin:
+//
+// - railX: the heart/comment/share icons' own leftmost pixels sit at
+//   x=961/965/962 of a 1080-wide frame (0.890/0.893/0.891) — comfortably
+//   right of the previous 0.79, which was costing sent bubbles ~125px of
+//   real, safe width for no reason. Using the minimum (0.890) of the three,
+//   the widest/leftmost-reaching icon decides the boundary, not an average
+//   that could still let some other icon poke past it.
+// - railTop: the heart icon's own top edge sits at 0.505 of frame height,
+//   not the previous 0.38 — that excluded an extra 0.125 (240px) of
+//   vertical space above the rail that nothing actually occupies.
+// - railBottom (0.96) was checked too and left alone: the last real
+//   element (a small audio-attribution icon) bottoms out at 0.901, so the
+//   existing value already has slack rather than being wrong.
+//
+// Note railTop/railBottom are consumed only by SafeZoneGrid's calibration
+// overlay — the bubble-clearance fix in bubbleLayout.ts/timeline.ts
+// constrains horizontal position unconditionally (regardless of vertical
+// position), not only within [railTop, railBottom]. So this correction
+// fixes the calibration reference itself; it doesn't by itself change what
+// a bubble is allowed to do. Making the horizontal constraint apply *only*
+// within this vertical band (freeing up full width above/below it) is a
+// separate, larger change with a real tradeoff — bubble width would stop
+// being a fixed, frame-independent fact about a message and start
+// depending on scroll position, which is exactly what "Text measurement
+// gates rendering" (CLAUDE.md) and the measured-once layout pipeline
+// currently assume never happens.
+//
+// topEnd, unlike railTop/railBottom, IS load-bearing: lib/chrome.ts uses it
+// to push DmHeader down clear of Instagram's own Reels-viewer chrome (back
+// arrow, title, icons — a fixed overlay on top of a posted Reel). Bumped
+// from 0.06 to 0.062 to match the same screenshot: that overlay's real
+// bottom edge sits at 0.057 of frame height (screenshot y 144-205, minus
+// the video's own top-edge offset), and the previous 0.06 was already
+// close, just measured before this specific overlap was found. Before this
+// fix, DmHeader started right after the status bar (~0.045) regardless —
+// well inside the overlay — so the sender's name and avatar rendered
+// directly underneath "Reels" on an actual posted video, even though they
+// were visible in a bare render.
 export const defaultSafeZones = {
-	topEnd: 0.06,
-	railX: 0.79,
-	railTop: 0.38,
+	topEnd: 0.062,
+	railX: 0.89,
+	railTop: 0.505,
 	railBottom: 0.96,
 	bottomStart: 0.82,
 };

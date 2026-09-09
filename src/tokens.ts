@@ -48,6 +48,31 @@ export const geometry = {
 	typingBubbleWidth: 0.16,
 	/** Diameter of each dot in the typing bubble. */
 	typingDotSize: 0.0139,
+	/**
+	 * Extra breathing room kept beyond `safeZones.railX` itself when
+	 * constraining bubble geometry — a bubble's edge shouldn't touch the
+	 * rail's boundary pixel-for-pixel, it should clear it with room to spare.
+	 */
+	safeEdgeClearance: 0.012,
+	/**
+	 * Reaction badge diameter and corner inset, as fractions of frame width /
+	 * the badge's own size. Shared between reactions.ts (which places the
+	 * badge) and timeline.ts (which has to know how far a badge can overhang
+	 * past its target bubble's edge when keeping that bubble clear of the
+	 * icon rail) — duplicating these as separate magic numbers in each file
+	 * would let the safety margin and the actual badge silently drift apart.
+	 */
+	reactionBadgeSize: 0.09,
+	reactionBadgeInset: 0.32,
+	/**
+	 * How far above its anchor point (the target bubble's bottom edge) a
+	 * reaction badge's own top sits, as a fraction of the badge's size — so
+	 * the remaining `1 - this` fraction is how far the badge hangs *below*
+	 * that edge. The stack layout needs this too: a reacted bubble needs
+	 * extra room reserved after it, or the next bubble in the stack lands
+	 * right on top of the badge (see the `bubbleGap` usage in timeline.ts).
+	 */
+	reactionBadgeVerticalOffset: 0.55,
 } as const;
 
 /**

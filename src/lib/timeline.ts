@@ -1,5 +1,5 @@
 import {spring} from 'remotion';
-import type {TimelineEvent, TypingEvent, SpringConfig as SpringConfigType} from '../types';
+import type {TimelineEvent, TypingEvent, SpringConfig as SpringConfigType, SafeZones} from '../types';
 import {computeBubbleLayout, typingBubbleSize} from './bubbleLayout';
 import {geometry} from '../tokens';
 import {lerp} from './math';
@@ -34,6 +34,15 @@ export type Slot = {
 	id: string;
 	from: 'me' | 'them';
 	phases: Phase[];
+	/**
+	 * Whether a reaction event targets this slot, anywhere in the script —
+	 * not whether one is currently visible on screen. Known up front from the
+	 * event list, so the stack can reserve room for the badge's overhang from
+	 * the moment this slot is created, rather than the next bubble jumping
+	 * down the instant the reaction pops in (nothing would drive that jump
+	 * with a spring, unlike every other layout change here).
+	 */
+	hasReaction: boolean;
 };
 
 /**
@@ -52,8 +61,17 @@ export type Slot = {
  * from `me`, which both stranded dots bubbles mid-stack and let a much later
  * `them` message merge into a stale slot and render out of order.
  */
-export const buildSlots = (events: TimelineEvent[], fps: number, frameWidthPx: number): Slot[] => {
+export const buildSlots = (
+	events: TimelineEvent[],
+	fps: number,
+	frameWidthPx: number,
+	safeZones: SafeZones,
+): Slot[] => {
 	const sorted = [...events].sort((a, b) => a.startSec - b.startSec);
+
+	const reactedMessageIds = new Set(
+		sorted.filter((ev): ev is Extract<TimelineEvent, {type: 'reaction'}> => ev.type === 'reaction').map((ev) => ev.targetId),
+	);
 
 	const nextMessageIndex = (afterIndex: number): number => {
 		for (let j = afterIndex + 1; j < sorted.length; j++) {
@@ -88,7 +106,7 @@ export const buildSlots = (events: TimelineEvent[], fps: number, frameWidthPx: n
 	sorted.forEach((ev, i) => {
 		if (ev.type !== 'message') return;
 
-		const layout = computeBubbleLayout(ev.text, frameWidthPx);
+		const layout = computeBubbleLayout(ev.text, frameWidthPx, ev.from, safeZones);
 		const messagePhase: MessagePhase = {
 			kind: 'message',
 			frame: Math.round(ev.startSec * fps),
@@ -102,9 +120,11 @@ export const buildSlots = (events: TimelineEvent[], fps: number, frameWidthPx: n
 			paddingVPx: layout.paddingVPx,
 		};
 
+		const hasReaction = reactedMessageIds.has(ev.id);
+
 		const typing = typingForMessage.get(i);
 		if (!typing) {
-			slots.push({id: ev.id, from: ev.from, phases: [messagePhase]});
+			slots.push({id: ev.id, from: ev.from, phases: [messagePhase], hasReaction});
 			return;
 		}
 
@@ -116,6 +136,7 @@ export const buildSlots = (events: TimelineEvent[], fps: number, frameWidthPx: n
 				{kind: 'typing', frame: Math.round(typing.startSec * fps), widthPx, heightPx},
 				messagePhase,
 			],
+			hasReaction,
 		});
 	});
 
@@ -177,6 +198,11 @@ export const computeFrameLayout = (
 	springConfig: SpringConfig,
 ): FrameLayout => {
 	const gapPx = frameWidthPx * geometry.bubbleGap;
+	// How far a reaction badge hangs below its target bubble's bottom edge
+	// (see ReactionBadge.tsx) — reserved as extra room after any slot a
+	// reaction targets, or the next bubble in the stack lands on top of it.
+	const reactionOverhangPx =
+		frameWidthPx * geometry.reactionBadgeSize * (1 - geometry.reactionBadgeVerticalOffset);
 
 	type GlobalEvent = {frame: number; slotIndex: number; phaseIndex: number};
 	const globalEvents: GlobalEvent[] = [];
@@ -229,7 +255,7 @@ export const computeFrameLayout = (
 
 		const top = cursorTop;
 		const bottom = top + heightPx;
-		cursorTop = bottom + gapPx;
+		cursorTop = bottom + gapPx + (slot.hasReaction ? reactionOverhangPx : 0);
 
 		const phase = slot.phases[curPhaseIdx];
 		const prevPhase = curPhaseIdx > 0 ? slot.phases[curPhaseIdx - 1] : null;
@@ -279,7 +305,7 @@ export const computeFrameLayout = (
 
 			const bTop = top;
 			const bBottom = bTop + h;
-			top = bBottom + gapPx;
+			top = bBottom + gapPx + (slot.hasReaction ? reactionOverhangPx : 0);
 			lastBottom = bBottom;
 			any = true;
 		}
@@ -295,10 +321,21 @@ export const computeFrameLayout = (
 	return {rows, scrollOffsetPx};
 };
 
-/** Horizontal [left, right] extent of a row's bubble in frame-pixel space. */
-export const bubbleXRange = (row: RenderRow, frameWidthPx: number): [number, number] => {
+/**
+ * Horizontal [left, right] extent of a row's bubble in frame-pixel space.
+ *
+ * A sent bubble is right-anchored — its width grows leftward from a fixed
+ * right edge — so keeping it clear of the icon rail means capping that
+ * anchor's position, not its width (which is already safely inside
+ * `maxBubbleWidth`; see `computeBubbleLayout`). A received bubble is the
+ * opposite: left-anchored, so its width is what was already capped upstream
+ * to keep its (derived) right edge clear — nothing to clamp here.
+ */
+export const bubbleXRange = (row: RenderRow, frameWidthPx: number, safeZones: SafeZones): [number, number] => {
 	if (row.from === 'me') {
-		const right = frameWidthPx * (1 - geometry.sentRightMargin);
+		const uncappedRight = frameWidthPx * (1 - geometry.sentRightMargin);
+		const safeRightEdgePx = frameWidthPx * safeZones.railX - frameWidthPx * geometry.safeEdgeClearance;
+		const right = Math.min(uncappedRight, safeRightEdgePx);
 		return [right - row.widthPx, right];
 	}
 	const left = frameWidthPx * geometry.receivedLeftOffset;
