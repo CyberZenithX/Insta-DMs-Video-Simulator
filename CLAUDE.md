@@ -112,6 +112,8 @@ These only apply when local-render mode is in play — either because Lambda isn
 
 Browser selection is environment-sensitive: locally Remotion uses its own managed Chrome; when `VERCEL`/`AWS_LAMBDA_FUNCTION_NAME` is set it falls back to `@sparticuz/chromium`.
 
+**Gotchas 3-5 above are themselves skipped when Lambda is configured on Vercel.** `scripts/local-render-enabled.mjs` gates on `REMOTION_LAMBDA_FUNCTION_NAME` — when it's set at build time (production, once Lambda is set up), production never executes `renderLocally()`, so `scripts/bundle-remotion.mjs` no-ops instead of building `remotion-bundle/`, and `next.config.js` excludes (rather than includes) `@sparticuz/chromium`, `@remotion/renderer`, and the compositor binaries from the deployed function. This is what keeps the deployed function small once Lambda is live — a Lambda-configured deployment ships single-digit MB instead of ~94MB. If the Lambda env vars are ever unset without a rebuild, `app/api/render/route.ts`'s bundle-missing check reports that plainly instead of the function silently trying (and failing) to render locally.
+
 ### Shared timing between preview and render
 
 `src/lib/scriptToEvents.ts` turns a plain `{from, text}[]` script into a timed event list (typing beats + length-scaled read pauses). Both `app/page.tsx` (live preview) and `app/api/render/route.ts` (server render) call it, so the preview can't drift from the output. Keep it that way — don't reimplement timing on one side.

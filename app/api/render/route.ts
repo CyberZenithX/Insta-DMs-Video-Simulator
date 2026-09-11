@@ -113,13 +113,17 @@ type RenderEvent =
 
 const renderLocally = async (inputProps: IgDmReelProps) => {
 	if (!fs.existsSync(BUNDLE_DIR)) {
-		return NextResponse.json(
-			{
-				error:
-					'Remotion bundle not found. Run "npm run build" (or "npm run bundle:remotion") before starting the server.',
-			},
-			{status: 500},
-		);
+		// On Vercel, a missing bundle almost always means this deployment was
+		// built with Lambda configured (REMOTION_LAMBDA_FUNCTION_NAME set at
+		// build time) — scripts/bundle-remotion.mjs skips building
+		// remotion-bundle/ in that case, since production never takes this
+		// branch. This only gets reached if the Lambda env vars were then
+		// unset (or dropped a required one) *after* that build, without a
+		// rebuild — see scripts/local-render-enabled.mjs.
+		const error = process.env.VERCEL
+			? 'Remotion Lambda is not configured, and this deployment was built with the local-render fallback pruned (REMOTION_LAMBDA_FUNCTION_NAME was set at build time, see scripts/local-render-enabled.mjs). Restore all four REMOTION_LAMBDA_* / REMOTION_AWS_* env vars, or trigger a rebuild with them unset to bring the local renderer back.'
+			: 'Remotion bundle not found. Run "npm run build" (or "npm run bundle:remotion") before starting the server.';
+		return NextResponse.json({error}, {status: 500});
 	}
 
 	const {openBrowser, renderMedia, selectComposition} = await import('@remotion/renderer');

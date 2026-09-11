@@ -18,7 +18,6 @@
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.290",
-    "@remotion/cli": "4.0.290",
     "@remotion/lambda": "^4.0.290",
     "@remotion/player": "^4.0.290",
     "@remotion/renderer": "^4.0.290",
@@ -32,6 +31,7 @@
     "zod": "3.22.3"
   },
   "devDependencies": {
+    "@remotion/cli": "4.0.290",
     "@types/react": "18.3.1",
     "@types/react-dom": "18.3.1",
     "typescript": "5.5.4"
