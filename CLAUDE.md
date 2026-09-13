@@ -14,7 +14,7 @@ So:
 - **Ask before editing anything under `src/` or `public/`.** Don't make the change first and mention it after.
 - **Once a change under `src/`/`public/` is made and pushed**, always tell the user the exact command to run afterward:
   - Composition/asset change only → `npm run lambda:deploy-site -- --region=<their region>`
-  - Also bumped the `@remotion/lambda`/`remotion` version, or changed `scripts/lambda-deploy-function.mjs`'s memory/timeout/disk settings → `npm run lambda:deploy-function` too (both need `REMOTION_AWS_ACCESS_KEY_ID`/`REMOTION_AWS_SECRET_ACCESS_KEY` set in their shell — never ask for or commit these).
+  - Also bumped the `@remotion/lambda`/`remotion` version, or changed `scripts/lambda-deploy-function.mjs`'s memory/timeout/disk settings → `npm run lambda:deploy-function` too (those three values are encoded in the function's *name*, so changing one deploys a **new** function — tell them to repoint `REMOTION_LAMBDA_FUNCTION_NAME` in Vercel at the name the script prints, or nothing changes) (both need `REMOTION_AWS_ACCESS_KEY_ID`/`REMOTION_AWS_SECRET_ACCESS_KEY` set in their shell — never ask for or commit these).
 - This doesn't apply to `app/` — that ships via their normal Vercel deploy, not a manual AWS step.
 
 ## Commands
