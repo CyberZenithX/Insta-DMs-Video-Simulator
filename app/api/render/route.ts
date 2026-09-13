@@ -41,7 +41,7 @@ const BUNDLE_DIR = path.join(process.cwd(), 'remotion-bundle');
 const isLambdaConfigured = () => Boolean(process.env.REMOTION_LAMBDA_FUNCTION_NAME);
 
 const buildInputProps = (parsed: GenerateRequest): IgDmReelProps => {
-	const {theme, receiverName, receiverUsername, clock, messages} = parsed;
+	const {theme, receiverName, receiverUsername, receiverAvatar, clock, messages} = parsed;
 	return igDmReelPropsSchema.parse({
 		...baseIgDmReelProps,
 		theme,
@@ -50,6 +50,10 @@ const buildInputProps = (parsed: GenerateRequest): IgDmReelProps => {
 			...defaultReceiver,
 			name: receiverName,
 			username: receiverUsername || defaultReceiver.username,
+			// Empty string and absent mean the same thing here — generate the
+			// initial from the name — so normalise to undefined rather than
+			// letting '' reach DmHeader, where it would be a falsy src.
+			avatar: receiverAvatar?.trim() || undefined,
 		},
 		events: buildEventsFromScript(messages),
 	});

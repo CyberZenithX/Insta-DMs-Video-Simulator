@@ -1,6 +1,7 @@
 import React from 'react';
 import {Img, staticFile} from 'remotion';
 import {interFontFamily} from '../lib/font';
+import {initialFromName, isAbsoluteAssetUrl} from '../lib/initials';
 import {layout, colors} from '../tokens';
 import type {IgDmReelProps} from '../types';
 
@@ -32,6 +33,79 @@ const Chevron: React.FC<{sizePx: number}> = ({sizePx}) => (
 	</svg>
 );
 
+/**
+ * The same magenta-to-indigo the old static public/avatar-demo.svg used
+ * (its linearGradient ran x1,y1=0%,0% to x2,y2=100%,100%, i.e. top-left to
+ * bottom-right, which is CSS's 135deg).
+ */
+const avatarGradient = 'linear-gradient(135deg, #D500C3 0%, #5A50FB 100%)';
+
+/**
+ * The receiver's picture: their own image when `receiver.avatar` is set,
+ * otherwise a gradient circle carrying the first letter of their name.
+ *
+ * The generated form is the default. The old behaviour was a single static
+ * file with the letter "J" baked into its markup, so every conversation
+ * showed a "J" no matter who it was with. Generating it here also means the
+ * header stops depending on a public/ asset at all in the common case —
+ * worth noting given progress.md records avatar-demo.svg as one of the two
+ * files that silently failed to upload to the S3 site and 404'd mid-render.
+ *
+ * Pure in its props and independent of `frame`, so the determinism contract
+ * (CLAUDE.md) holds: the same receiver always produces the same pixels.
+ */
+const Avatar: React.FC<{
+	receiver: IgDmReelProps['receiver'];
+	sizePx: number;
+}> = ({receiver, sizePx}) => {
+	const shared = {
+		width: sizePx,
+		height: sizePx,
+		borderRadius: '50%',
+		flexShrink: 0,
+	} as const;
+
+	if (receiver.avatar) {
+		return (
+			<Img
+				// A bare public/-relative filename needs staticFile() to resolve
+				// under Studio, the <Player> preview, local rendering and
+				// Lambda's sites/<name>/-prefixed S3 site alike (see
+				// src/data/defaultProps.ts). An already-complete URL — what the
+				// web UI's avatar field accepts — must NOT go through it, since
+				// staticFile() would prefix it into a broken path.
+				src={isAbsoluteAssetUrl(receiver.avatar) ? receiver.avatar : staticFile(receiver.avatar)}
+				style={{...shared, objectFit: 'cover'}}
+			/>
+		);
+	}
+
+	return (
+		<div
+			style={{
+				...shared,
+				background: avatarGradient,
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				fontFamily: interFontFamily,
+				fontWeight: 700,
+				// 0.45 of the diameter, matching the old SVG's 90px glyph in its
+				// own 200px viewBox, so swapping the file for this changes the
+				// letter but not its weight on the page.
+				fontSize: sizePx * 0.45,
+				color: '#FFFFFF',
+				// A name with no letter or digit at all yields '', leaving a
+				// plain gradient circle rather than a stray placeholder glyph.
+				lineHeight: 1,
+				userSelect: 'none',
+			}}
+		>
+			{initialFromName(receiver.name)}
+		</div>
+	);
+};
+
 export const DmHeader: React.FC<{
 	frameWidthPx: number;
 	receiver: IgDmReelProps['receiver'];
@@ -55,22 +129,7 @@ export const DmHeader: React.FC<{
 			}}
 		>
 			<Chevron sizePx={chevronSize} />
-			<Img
-				// receiver.avatar is a bare public/-relative filename, not a
-				// resolved URL (see src/data/defaultProps.ts) — staticFile()
-				// is what makes it resolve correctly whether this renders in
-				// Remotion Studio, the <Player> preview, local in-process
-				// rendering, or on Remotion Lambda, each of which serves
-				// public/ from a different actual base path.
-				src={staticFile(receiver.avatar)}
-				style={{
-					width: avatarSize,
-					height: avatarSize,
-					borderRadius: '50%',
-					objectFit: 'cover',
-					flexShrink: 0,
-				}}
-			/>
+			<Avatar receiver={receiver} sizePx={avatarSize} />
 			<div style={{display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0}}>
 				<div
 					style={{

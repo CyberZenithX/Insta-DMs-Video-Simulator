@@ -85,6 +85,20 @@ The composition fills the entire 1080×1920 canvas like a real screen recording.
 
 One master gradient is sampled per-bubble by that bubble's *live viewport position* each frame (`src/gradient.ts`), so sent bubbles shift color as they scroll rather than each being flatly tinted. Themes (`src/themes.ts`, sampled from Instagram's own Theme picker) swap the stops for both the chat backdrop and the bubbles — but sent bubbles use a **darkened** copy of the theme's stops, or they'd blend invisibly into a same-hue background.
 
+### The header avatar is generated, not an asset
+
+`receiver.avatar` is **optional**. Left unset — the default — `DmHeader` renders a gradient circle containing the first letter of `receiver.name`, derived by `initialFromName()` (`src/lib/initials.ts`). Set it to use a real picture instead.
+
+Three things about that helper are deliberate:
+
+- **It iterates by code point (`for...of`), not by index.** `name[0]` on `"👀John"` returns half a surrogate pair, which renders as tofu.
+- **It skips to the first letter or digit.** A name like `"Noor❤️"` yields `N`. Showing the emoji instead would put a *system-font* glyph on screen — exactly what `src/emoji/parse.ts` exists to prevent. A name with no letter or digit at all yields `''`, leaving a plain gradient circle.
+- **It uses `toUpperCase()`, never `toLocaleUpperCase()`.** The locale-aware form reads the host locale, so a Turkish-locale machine maps `i` → `İ` while Lambda's C locale maps it → `I`. That would make identical props render differently in two places, breaking the determinism contract.
+
+`avatar` accepts two shapes and `DmHeader` distinguishes them with `isAbsoluteAssetUrl()`: a public/-relative filename goes through `staticFile()` (see gotcha 1 below for why that matters on Lambda), while a complete `http(s)`/`data:` URL is used verbatim — passing one to `staticFile()` would prefix it into a broken path.
+
+`public/avatar-demo.svg` still exists as the worked example of the filename form, but is no longer the default: it has the letter `J` baked into its markup, so using it as the default made *every* conversation show a `J` regardless of the name.
+
 ### Emoji are images, not font glyphs
 
 The system emoji font is bypassed. `src/emoji/parse.ts` tokenizes emoji out of message text and maps each to a Noto Color Emoji filename by codepoint (`👀` → `emoji_u1f440.png`), served from `public/emoji/`. **Adding an emoji to a script requires adding the matching PNG** — otherwise it 404s mid-render and the render fails. Only a handful are currently vendored.
@@ -118,4 +132,4 @@ Browser selection is environment-sensitive: locally Remotion uses its own manage
 
 `src/lib/scriptToEvents.ts` turns a plain `{from, text}[]` script into a timed event list (typing beats + length-scaled read pauses). Both `app/page.tsx` (live preview) and `app/api/render/route.ts` (server render) call it, so the preview can't drift from the output. Keep it that way — don't reimplement timing on one side.
 
-The web UI exposes only a subset of `IgDmReelProps` (theme, receiver, clock, message script). `background`, `safeZones`, `scrollAnchor`, `spring`, and reaction events are reachable only through Remotion Studio or the CLI.
+The web UI exposes only a subset of `IgDmReelProps` (theme, receiver incl. the optional avatar URL, clock, message script). `background`, `safeZones`, `scrollAnchor`, `spring`, and reaction events are reachable only through Remotion Studio or the CLI.

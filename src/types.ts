@@ -45,7 +45,12 @@ export type TimelineEvent = z.infer<typeof eventSchema>;
 export const receiverSchema = z.object({
 	name: z.string(),
 	username: z.string(),
-	avatar: z.string(),
+	/**
+	 * Optional. Unset (the default) means DmHeader generates a gradient circle
+	 * showing the first letter of `name`. Set it to a public/-relative filename
+	 * or a complete http(s)/data URL to use a real picture instead.
+	 */
+	avatar: z.string().optional(),
 	activeNow: z.boolean(),
 });
 
@@ -135,6 +140,22 @@ export const generateRequestSchema = z.object({
 	theme: themeSchema,
 	receiverName: z.string().min(1).max(40),
 	receiverUsername: z.string().max(40).optional(),
+	/**
+	 * Optional image for the header avatar. Omitted or empty means the
+	 * generated initial. Constrained to the two shapes DmHeader can actually
+	 * resolve at render time: a complete http(s) URL, or a public/-relative
+	 * filename. A blob:/data: URL from a local file picker is rejected here
+	 * rather than at render time — blob: dies with the browser tab, and a
+	 * data: URL of any real photo would blow past a sane request body.
+	 */
+	receiverAvatar: z
+		.string()
+		.max(500)
+		.refine(
+			(v) => v === '' || /^https?:\/\//i.test(v) || /^[\w.\-/]+\.(png|jpe?g|gif|webp|avif|svg)$/i.test(v),
+			'Avatar must be an http(s) image URL, or a filename inside public/.',
+		)
+		.optional(),
 	clock: z.string().max(8).optional(),
 	messages: z.array(scriptMessageSchema).min(1).max(40),
 });

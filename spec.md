@@ -135,5 +135,5 @@ None of these are read anywhere except inside the two API routes above (dynamica
 - No persistence *in this app* — the Next.js server itself is stateless, request in, response out either way. In Lambda mode the rendered MP4 does land in S3 (that's what `outputFile` points at) and stays there under whatever lifecycle/expiry Remotion Lambda's own deploy sets up — not something this app manages or exposes as a feature (no gallery of past renders, no way to re-fetch an old `renderId`).
 - No account system, no saved scripts, no share links.
 - No video/image/gradient chat backgrounds from the UI (schema allows it, nothing wires it up).
-- No custom avatar upload — fixed to `public/avatar-demo.svg`.
+- No custom avatar *upload* — the header avatar is generated from the receiver's first initial by default, and the UI's "Avatar image URL" field takes a publicly-reachable http(s) URL (or a filename already inside `public/`). There's no file picker and nothing is stored server-side; a `blob:` URL from a local file would preview and then fail the render, so the schema rejects it.
 - No automated tests. Verification is manual: render a still or a full video and look at it.

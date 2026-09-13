@@ -5,6 +5,7 @@ import {Player} from '@remotion/player';
 import {IgDmReel} from '../src/compositions/IgDmReel';
 import {lastActiveFrame} from '../src/lib/timeline';
 import {buildEventsFromScript} from '../src/lib/scriptToEvents';
+import {initialFromName} from '../src/lib/initials';
 import {baseIgDmReelProps, defaultClock, defaultReceiver} from '../src/data/defaultProps';
 import {FPS, WIDTH, HEIGHT} from '../src/constants';
 import type {ThemeName} from '../src/themes';
@@ -94,6 +95,12 @@ export default function Page() {
 	const [theme, setTheme] = useState<ThemeName>('none');
 	const [receiverName, setReceiverName] = useState('Jordan');
 	const [receiverUsername, setReceiverUsername] = useState('@jordan.codes');
+	// Empty means "generate the avatar from the name's first letter", which
+	// is the default; a URL here overrides it with a real picture.
+	const [receiverAvatar, setReceiverAvatar] = useState('');
+	// Same helper the composition uses, so this hint cannot drift from the
+	// letter that actually renders.
+	const initialPreview = initialFromName(receiverName || defaultReceiver.name);
 	const [clock, setClock] = useState(defaultClock);
 	const [messages, setMessages] = useState<ScriptMessage[]>(INITIAL_MESSAGES);
 	const [generating, setGenerating] = useState(false);
@@ -117,10 +124,11 @@ export default function Page() {
 				...defaultReceiver,
 				name: receiverName || defaultReceiver.name,
 				username: receiverUsername || defaultReceiver.username,
+				avatar: receiverAvatar.trim() || undefined,
 			},
 			events,
 		}),
-		[theme, clock, receiverName, receiverUsername, events],
+		[theme, clock, receiverName, receiverUsername, receiverAvatar, events],
 	);
 
 	const durationInFrames = Math.max(
@@ -165,6 +173,7 @@ export default function Page() {
 					theme,
 					receiverName: receiverName.trim() || defaultReceiver.name,
 					receiverUsername,
+					receiverAvatar: receiverAvatar.trim(),
 					clock,
 					messages: messages.map(({from, text, reaction}) => ({from, text, reaction})),
 				}),
@@ -336,6 +345,22 @@ export default function Page() {
 						<input value={clock} onChange={(e) => setClock(e.target.value)} maxLength={8} style={fullWidth} />
 					</label>
 				</div>
+
+				<label style={labelStyle}>
+					Avatar image URL <span style={{color: '#a8a8a8'}}>— optional</span>
+					<input
+						value={receiverAvatar}
+						onChange={(e) => setReceiverAvatar(e.target.value)}
+						maxLength={500}
+						placeholder={`https://example.com/photo.jpg — leave empty for "${initialPreview || '?'}"`}
+						style={fullWidth}
+					/>
+					<span style={{fontSize: 12, color: '#a8a8a8', marginTop: 4}}>
+						{receiverAvatar.trim()
+							? 'Must stay publicly reachable — the renderer fetches it server-side.'
+							: `Using the first letter of the name${initialPreview ? ` — "${initialPreview}"` : ''}.`}
+					</span>
+				</label>
 
 				<div style={{marginTop: 12}}>
 					<div style={{fontSize: 13, color: '#a8a8a8', marginBottom: 8}}>Conversation</div>

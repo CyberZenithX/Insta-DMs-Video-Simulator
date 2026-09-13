@@ -17,6 +17,12 @@ import type {IgDmReelProps} from '../types';
 // root-relative path like `/avatar-demo.svg` looked correct locally but
 // silently resolved against the S3 bucket's own root on Lambda, 404ing.
 
+// Kept as the worked example of the public/-relative form `receiver.avatar`
+// accepts, and so the committed demo asset still has a named reference. It is
+// deliberately NOT part of defaultReceiver any more: that file has the letter
+// "J" baked into its markup, so using it as the default made every
+// conversation show a "J" regardless of who it was with. Leaving `avatar`
+// unset makes DmHeader generate the initial from the name instead.
 export const defaultAvatarFile = 'avatar-demo.svg';
 
 // railX/railTop were re-measured against a real posted Reel (a screenshot
@@ -74,7 +80,7 @@ export const defaultSafeZones = {
 export const defaultReceiver: IgDmReelProps['receiver'] = {
 	name: 'Jordan',
 	username: '@jordan.codes',
-	avatar: defaultAvatarFile,
+	// avatar intentionally omitted — see defaultAvatarFile above.
 	activeNow: true,
 };
 
