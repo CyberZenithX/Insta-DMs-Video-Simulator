@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {baseIgDmReelProps, defaultClock, defaultReceiver} from '../../../src/data/defaultProps';
 import {buildEventsFromScript} from '../../../src/lib/scriptToEvents';
+import {buildInitialAvatarDataUrl} from '../../../src/lib/avatar';
 import {generateRequestSchema, igDmReelPropsSchema} from '../../../src/types';
 import type {GenerateRequest, IgDmReelProps} from '../../../src/types';
 import type {AwsRegion} from '@remotion/lambda/client';
@@ -50,6 +51,7 @@ const buildInputProps = (parsed: GenerateRequest): IgDmReelProps => {
 			...defaultReceiver,
 			name: receiverName,
 			username: receiverUsername || defaultReceiver.username,
+			avatar: buildInitialAvatarDataUrl(receiverName),
 		},
 		events: buildEventsFromScript(messages),
 	});
