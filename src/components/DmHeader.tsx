@@ -4,6 +4,11 @@ import {interFontFamily} from '../lib/font';
 import {layout, colors} from '../tokens';
 import type {IgDmReelProps} from '../types';
 
+const resolveAvatarSrc = (avatar: string): string => {
+	if (/^(data:|https?:|blob:|\/)/.test(avatar)) return avatar;
+	return staticFile(avatar);
+};
+
 const PhoneIcon: React.FC<{sizePx: number}> = ({sizePx}) => (
 	<svg width={sizePx} height={sizePx} viewBox="0 0 24 24" fill="none">
 		<path
@@ -56,13 +61,9 @@ export const DmHeader: React.FC<{
 		>
 			<Chevron sizePx={chevronSize} />
 			<Img
-				// receiver.avatar is a bare public/-relative filename, not a
-				// resolved URL (see src/data/defaultProps.ts) — staticFile()
-				// is what makes it resolve correctly whether this renders in
-				// Remotion Studio, the <Player> preview, local in-process
-				// rendering, or on Remotion Lambda, each of which serves
-				// public/ from a different actual base path.
-				src={staticFile(receiver.avatar)}
+				// receiver.avatar can be either a bare public/-relative filename
+				// (resolved through staticFile()) or a full URL/data URL.
+				src={resolveAvatarSrc(receiver.avatar)}
 				style={{
 					width: avatarSize,
 					height: avatarSize,

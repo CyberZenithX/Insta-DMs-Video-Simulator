@@ -5,6 +5,7 @@ import {Player} from '@remotion/player';
 import {IgDmReel} from '../src/compositions/IgDmReel';
 import {lastActiveFrame} from '../src/lib/timeline';
 import {buildEventsFromScript} from '../src/lib/scriptToEvents';
+import {buildInitialAvatarDataUrl} from '../src/lib/avatar';
 import {baseIgDmReelProps, defaultClock, defaultReceiver} from '../src/data/defaultProps';
 import {FPS, WIDTH, HEIGHT} from '../src/constants';
 import type {ThemeName} from '../src/themes';
@@ -117,6 +118,7 @@ export default function Page() {
 				...defaultReceiver,
 				name: receiverName || defaultReceiver.name,
 				username: receiverUsername || defaultReceiver.username,
+				avatar: buildInitialAvatarDataUrl(receiverName || defaultReceiver.name),
 			},
 			events,
 		}),
