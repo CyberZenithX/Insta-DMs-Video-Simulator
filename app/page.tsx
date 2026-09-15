@@ -1,6 +1,6 @@
 'use client';
 
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {Player} from '@remotion/player';
 import {IgDmReel} from '../src/compositions/IgDmReel';
 import {lastActiveFrame} from '../src/lib/timeline';
@@ -9,7 +9,7 @@ import {buildInitialAvatarDataUrl} from '../src/lib/avatar';
 import {baseIgDmReelProps, defaultClock, defaultReceiver} from '../src/data/defaultProps';
 import {FPS, WIDTH, HEIGHT} from '../src/constants';
 import type {ThemeName} from '../src/themes';
-import type {IgDmReelProps} from '../src/types';
+import type {IgDmReelProps, RenderBackend} from '../src/types';
 import {VENDORED_REACTION_EMOJIS} from '../src/emoji/config';
 
 type ScriptMessage = {id: string; from: 'me' | 'them'; text: string; reaction?: string};
@@ -103,6 +103,22 @@ export default function Page() {
 	const [renderProgress, setRenderProgress] = useState(0);
 	const [renderFrames, setRenderFrames] = useState<{done: number; total: number} | null>(null);
 	const [etaMs, setEtaMs] = useState<number | null>(null);
+	const [renderBackend, setRenderBackend] = useState<RenderBackend>('local');
+	const [lambdaConfigured, setLambdaConfigured] = useState<boolean | null>(null);
+
+	useEffect(() => {
+		fetch('/api/render')
+			.then((res) => (res.ok ? res.json() : null))
+			.then((data) => {
+				if (data && typeof data.lambdaConfigured === 'boolean') {
+					setLambdaConfigured(data.lambdaConfigured);
+					if (data.lambdaConfigured) {
+						setRenderBackend('lambda');
+					}
+				}
+			})
+			.catch(() => {});
+	}, []);
 
 	const events = useMemo(
 		() => buildEventsFromScript(messages.map(({from, text, reaction}) => ({from, text, reaction}))),
@@ -169,6 +185,7 @@ export default function Page() {
 					receiverUsername,
 					clock,
 					messages: messages.map(({from, text, reaction}) => ({from, text, reaction})),
+					renderBackend,
 				}),
 			});
 
@@ -384,6 +401,115 @@ export default function Page() {
 					<button onClick={addMessage} style={addButtonStyle}>
 						+ Add message
 					</button>
+				</div>
+
+				<div style={{marginTop: 18, marginBottom: 4}}>
+					<div style={{fontSize: 13, color: '#a8a8a8', marginBottom: 8}}>Generate via</div>
+					<div
+						style={{
+							display: 'flex',
+							gap: 8,
+							background: '#16161a',
+							padding: 4,
+							borderRadius: 10,
+							border: '1px solid #2e2e36',
+						}}
+					>
+						<button
+							type="button"
+							onClick={() => setRenderBackend('lambda')}
+							disabled={lambdaConfigured === false}
+							style={{
+								flex: 1,
+								padding: '8px 12px',
+								borderRadius: 8,
+								border: 'none',
+								fontSize: 13,
+								fontWeight: 500,
+								cursor: lambdaConfigured === false ? 'not-allowed' : 'pointer',
+								background: renderBackend === 'lambda' ? '#2e2e38' : 'transparent',
+								color:
+									lambdaConfigured === false
+										? '#5a5a66'
+										: renderBackend === 'lambda'
+											? '#ffffff'
+											: '#a8a8a8',
+								boxShadow: renderBackend === 'lambda' ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+								transition: 'all 150ms ease',
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								gap: 6,
+							}}
+						>
+							<span>AWS Lambda</span>
+							{lambdaConfigured === false ? (
+								<span
+									style={{
+										fontSize: 10,
+										padding: '2px 5px',
+										borderRadius: 4,
+										background: '#24242c',
+										color: '#777785',
+									}}
+								>
+									Unavailable
+								</span>
+							) : (
+								<span
+									style={{
+										fontSize: 10,
+										padding: '2px 5px',
+										borderRadius: 4,
+										background: renderBackend === 'lambda' ? '#383848' : '#24242c',
+										color: renderBackend === 'lambda' ? '#c4c4d0' : '#777785',
+									}}
+								>
+									Cloud
+								</span>
+							)}
+						</button>
+
+						<button
+							type="button"
+							onClick={() => setRenderBackend('local')}
+							style={{
+								flex: 1,
+								padding: '8px 12px',
+								borderRadius: 8,
+								border: 'none',
+								fontSize: 13,
+								fontWeight: 500,
+								cursor: 'pointer',
+								background: renderBackend === 'local' ? '#2e2e38' : 'transparent',
+								color: renderBackend === 'local' ? '#ffffff' : '#a8a8a8',
+								boxShadow: renderBackend === 'local' ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
+								transition: 'all 150ms ease',
+								display: 'flex',
+								alignItems: 'center',
+								justifyContent: 'center',
+								gap: 6,
+							}}
+						>
+							<span>Local</span>
+							<span
+								style={{
+									fontSize: 10,
+									padding: '2px 5px',
+									borderRadius: 4,
+									background: renderBackend === 'local' ? '#383848' : '#24242c',
+									color: renderBackend === 'local' ? '#c4c4d0' : '#777785',
+								}}
+							>
+								In-process
+							</span>
+						</button>
+					</div>
+					{lambdaConfigured === false && (
+						<p style={{fontSize: 11, color: '#777785', marginTop: 6, marginBottom: 0}}>
+							AWS Lambda is not configured in this environment; renders will run locally.
+						</p>
+					)}
 				</div>
 
 				<button onClick={generate} disabled={generating} style={generateButtonStyle}>

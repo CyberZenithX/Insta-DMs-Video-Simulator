@@ -131,12 +131,16 @@ export const scriptMessageSchema = z.object({
 	reaction: reactionEmojiSchema.optional(),
 });
 
+export const renderBackendSchema = z.enum(['lambda', 'local']);
+export type RenderBackend = z.infer<typeof renderBackendSchema>;
+
 export const generateRequestSchema = z.object({
 	theme: themeSchema,
 	receiverName: z.string().min(1).max(40),
 	receiverUsername: z.string().max(40).optional(),
 	clock: z.string().max(8).optional(),
 	messages: z.array(scriptMessageSchema).min(1).max(40),
+	renderBackend: renderBackendSchema.optional(),
 });
 
 export type ScriptMessageInput = z.infer<typeof scriptMessageSchema>;

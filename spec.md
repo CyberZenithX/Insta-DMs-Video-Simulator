@@ -64,22 +64,33 @@ Request body (`generateRequestSchema`, `src/types.ts`):
   receiverUsername?: string;        // ≤40 chars, defaults to '@jordan.codes'
   clock?: string;                   // ≤8 chars, defaults to '9:41'
   messages: {from: 'me'|'them'; text: string}[];  // 1–40 items, each text 1–280 chars
+  renderBackend?: 'lambda' | 'local'; // optional override; defaults to lambda if configured, otherwise local
 }
 ```
 
-Server behavior, steps 1–3 identical regardless of render mode:
+### `GET /api/render`
+
+Returns server render capabilities:
+```json
+{
+  "lambdaConfigured": boolean,
+  "localBundleAvailable": boolean
+}
+```
+
+Server behavior for `POST /api/render`, steps 1–3 identical regardless of render mode:
 1. Validate the body against `generateRequestSchema`. Fails closed with `400` and the first Zod issue message on any violation — nothing renders on invalid input.
 2. Turn `messages` into a full `TimelineEvent[]` via `buildEventsFromScript()` (`src/lib/scriptToEvents.ts`) — the same function the live preview uses, so preview and output can't drift. A `'them'` message gets a preceding typing beat (1.2s, +0.15s gap); a `'me'` message spends an equivalent beat but draws no bubble (see the `typing` constraint above). Read pause after each message: `min(1.6, 0.5 + 0.02 × text.length)` seconds.
 3. Merge with `baseIgDmReelProps` + `defaultReceiver` (name/username overridden from the request), validate the assembled object against `igDmReelPropsSchema`.
 
-Step 4 branches on whether Remotion Lambda is configured (`REMOTION_LAMBDA_FUNCTION_NAME` env var set):
+Step 4 branches on the requested `renderBackend` (if set) or whether Remotion Lambda is configured (`REMOTION_LAMBDA_FUNCTION_NAME` env var set):
 
-**Lambda mode** (`REMOTION_LAMBDA_FUNCTION_NAME` set — the intended production path):
-4. `renderMediaOnLambda()` (`@remotion/lambda/client` — no `@remotion/renderer`/Chromium touched in this route at all) kicks off an async render on AWS Lambda against the deployed `serveUrl` (an S3-hosted bundle, not the local `remotion-bundle/`), then returns immediately.
+**Lambda mode** (`renderBackend === 'lambda'`, or unspecified with `REMOTION_LAMBDA_FUNCTION_NAME` set):
+4. `renderMediaOnLambda()` (`@remotion/lambda/client` — no `@remotion/renderer`/Chromium touched in this route at all) kicks off an async render on AWS Lambda against the deployed `serveUrl` (an S3-hosted bundle, not the local `remotion-bundle/`), then returns immediately. If `renderBackend === 'lambda'` is explicitly requested when Lambda is not configured, returns `400`.
 
 Response: `200`, `Content-Type: application/json`, body `{mode: 'lambda', renderId: string, bucketName: string, functionName: string, region: string}`. This response arrives in well under a second regardless of how long the render itself takes — the client is expected to then poll `GET /api/render/progress` (below) rather than wait on this request.
 
-**Local-render mode** (no `REMOTION_LAMBDA_FUNCTION_NAME` — used for `npm run dev` without AWS set up, and the only mode available before Remotion Lambda was added):
+**Local-render mode** (`renderBackend === 'local'`, or unspecified without `REMOTION_LAMBDA_FUNCTION_NAME`):
 4. One headless browser is opened (`openBrowser()`) and shared between `selectComposition` and `renderMedia` against the pre-built bundle at `remotion-bundle/` (must exist — built by `npm run bundle:remotion`, part of `npm run build`). Browser binary: `@sparticuz/chromium` when `VERCEL` or `AWS_LAMBDA_FUNCTION_NAME` is set, otherwise Remotion's own local browser.
 
 Response: `200`, `Content-Type: application/x-ndjson`, a **streamed**, newline-delimited sequence of JSON events (not one buffered response) — the client is expected to read `response.body` incrementally, not `await response.json()`/`.blob()`:
@@ -91,7 +102,7 @@ Response: `200`, `Content-Type: application/x-ndjson`, a **streamed**, newline-d
 {type: 'error'; error: string}       // in place of 'done', if the render fails after streaming has started
 ```
 
-The client distinguishes the two modes by response `Content-Type`, not by any request parameter — the choice is entirely server-side, driven by which env vars are configured on the deployment.
+The client distinguishes the two modes by response `Content-Type`, and can select the desired mode in the UI via the `renderBackend` parameter.
 
 A request that fails **validation** never reaches either render mode: `400` with a plain synchronous `{error: string}` JSON body regardless of mode. `500` for local-mode's missing-bundle-directory check; Lambda mode has no local precondition to check, so its only `500`s come from the AWS SDK call itself failing (bad credentials, function doesn't exist, etc.).
 

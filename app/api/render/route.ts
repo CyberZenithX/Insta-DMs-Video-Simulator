@@ -237,6 +237,13 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 	});
 };
 
+export async function GET() {
+	return NextResponse.json({
+		lambdaConfigured: isLambdaConfigured(),
+		localBundleAvailable: fs.existsSync(BUNDLE_DIR),
+	});
+}
+
 export async function POST(request: Request) {
 	let body: unknown;
 	try {
@@ -250,7 +257,30 @@ export async function POST(request: Request) {
 		return NextResponse.json({error: parsedRequest.error.issues[0]?.message ?? 'Invalid request.'}, {status: 400});
 	}
 
+	const {renderBackend} = parsedRequest.data;
 	const inputProps = buildInputProps(parsedRequest.data);
+
+	if (renderBackend === 'local') {
+		return renderLocally(inputProps);
+	}
+
+	if (renderBackend === 'lambda') {
+		if (!isLambdaConfigured()) {
+			return NextResponse.json(
+				{error: 'AWS Lambda rendering is not configured on this server.'},
+				{status: 400},
+			);
+		}
+		try {
+			return await renderOnLambda(inputProps);
+		} catch (err) {
+			console.error('Failed to start Lambda render', err);
+			return NextResponse.json(
+				{error: err instanceof Error ? err.message : 'Failed to start render.'},
+				{status: 500},
+			);
+		}
+	}
 
 	if (isLambdaConfigured()) {
 		try {
@@ -266,3 +296,4 @@ export async function POST(request: Request) {
 
 	return renderLocally(inputProps);
 }
+
