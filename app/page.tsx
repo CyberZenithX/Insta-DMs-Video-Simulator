@@ -105,15 +105,21 @@ export default function Page() {
 	const [etaMs, setEtaMs] = useState<number | null>(null);
 	const [renderBackend, setRenderBackend] = useState<RenderBackend>('local');
 	const [lambdaConfigured, setLambdaConfigured] = useState<boolean | null>(null);
+	const [localBundleAvailable, setLocalBundleAvailable] = useState<boolean | null>(null);
 
 	useEffect(() => {
 		fetch('/api/render')
 			.then((res) => (res.ok ? res.json() : null))
 			.then((data) => {
-				if (data && typeof data.lambdaConfigured === 'boolean') {
-					setLambdaConfigured(data.lambdaConfigured);
-					if (data.lambdaConfigured) {
-						setRenderBackend('lambda');
+				if (data) {
+					if (typeof data.lambdaConfigured === 'boolean') {
+						setLambdaConfigured(data.lambdaConfigured);
+						if (data.lambdaConfigured) {
+							setRenderBackend('lambda');
+						}
+					}
+					if (typeof data.localBundleAvailable === 'boolean') {
+						setLocalBundleAvailable(data.localBundleAvailable);
 					}
 				}
 			})
@@ -473,6 +479,7 @@ export default function Page() {
 						<button
 							type="button"
 							onClick={() => setRenderBackend('local')}
+							disabled={localBundleAvailable === false}
 							style={{
 								flex: 1,
 								padding: '8px 12px',
@@ -480,9 +487,14 @@ export default function Page() {
 								border: 'none',
 								fontSize: 13,
 								fontWeight: 500,
-								cursor: 'pointer',
+								cursor: localBundleAvailable === false ? 'not-allowed' : 'pointer',
 								background: renderBackend === 'local' ? '#2e2e38' : 'transparent',
-								color: renderBackend === 'local' ? '#ffffff' : '#a8a8a8',
+								color:
+									localBundleAvailable === false
+										? '#5a5a66'
+										: renderBackend === 'local'
+											? '#ffffff'
+											: '#a8a8a8',
 								boxShadow: renderBackend === 'local' ? '0 1px 3px rgba(0,0,0,0.3)' : 'none',
 								transition: 'all 150ms ease',
 								display: 'flex',
@@ -492,22 +504,41 @@ export default function Page() {
 							}}
 						>
 							<span>Local</span>
-							<span
-								style={{
-									fontSize: 10,
-									padding: '2px 5px',
-									borderRadius: 4,
-									background: renderBackend === 'local' ? '#383848' : '#24242c',
-									color: renderBackend === 'local' ? '#c4c4d0' : '#777785',
-								}}
-							>
-								In-process
-							</span>
+							{localBundleAvailable === false ? (
+								<span
+									style={{
+										fontSize: 10,
+										padding: '2px 5px',
+										borderRadius: 4,
+										background: '#24242c',
+										color: '#777785',
+									}}
+								>
+									Unavailable
+								</span>
+							) : (
+								<span
+									style={{
+										fontSize: 10,
+										padding: '2px 5px',
+										borderRadius: 4,
+										background: renderBackend === 'local' ? '#383848' : '#24242c',
+										color: renderBackend === 'local' ? '#c4c4d0' : '#777785',
+									}}
+								>
+									In-process
+								</span>
+							)}
 						</button>
 					</div>
 					{lambdaConfigured === false && (
 						<p style={{fontSize: 11, color: '#777785', marginTop: 6, marginBottom: 0}}>
 							AWS Lambda is not configured in this environment; renders will run locally.
+						</p>
+					)}
+					{localBundleAvailable === false && (
+						<p style={{fontSize: 11, color: '#ff6b6b', marginTop: 6, marginBottom: 0}}>
+							Local render bundle is not available on this deployment.
 						</p>
 					)}
 				</div>
