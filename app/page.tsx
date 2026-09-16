@@ -186,6 +186,12 @@ export default function Page() {
 					`/api/render/progress?renderId=${encodeURIComponent(renderId)}&bucketName=${encodeURIComponent(bucketName)}`,
 				);
 				if (!progressRes.ok) {
+					// 404 on a local render means the background worker hasn't written
+					// its first state file yet (race between fire-and-forget start and
+					// first poll). Treat it as "still launching" and keep polling.
+					if (progressRes.status === 404 && bucketName === 'local') {
+						continue;
+					}
 					const body = await progressRes.json().catch(() => null);
 					throw new Error(body?.error || `Couldn't check render status (${progressRes.status}).`);
 				}
