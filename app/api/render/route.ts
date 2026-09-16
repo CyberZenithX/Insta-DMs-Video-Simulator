@@ -194,6 +194,9 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 					puppeteerInstance: browser,
 					browserExecutable,
 					chromiumOptions,
+					muted: true, // Skips the audio mixing step completely (free performance since there's no sound)
+					hardwareAcceleration: isServerlessSandbox ? undefined : 'if-possible',
+					// We let Remotion manage concurrency by default, as forcing max threads on a low-end laptop causes RAM/CPU thrashing
 					onProgress: (p) => {
 						send({
 							type: 'progress',
