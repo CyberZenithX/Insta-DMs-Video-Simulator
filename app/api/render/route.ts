@@ -121,121 +121,94 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 		);
 	}
 
-
 	const {openBrowser, renderMedia, selectComposition} = await import('@remotion/renderer');
+	const {setLocalRenderState} = await import('../../../src/lib/localRenderStore');
 
 	const isServerlessSandbox = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+	const renderId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-	// Locally, Remotion manages its own downloaded Chrome Headless Shell. On
-	// Vercel's serverless Node runtime there's no such binary available, so we
-	// fall back to a Lambda-compatible prebuilt Chromium instead.
 	const getBrowserExecutable = async (): Promise<string | null> => {
 		if (!isServerlessSandbox) return null;
-
-		// @sparticuz/chromium only unpacks its bundled glibc-compat shared
-		// libraries (nss, nspr, etc.) and points LD_LIBRARY_PATH at them when its
-		// own env-var check thinks it's running inside AWS Lambda (it looks for
-		// AWS_EXECUTION_ENV / AWS_LAMBDA_JS_RUNTIME, both checked at import time).
-		// Vercel's Node runtime never sets either, even though it's a Lambda-like
-		// sandbox, so that setup step silently gets skipped: the `chromium`
-		// binary is there, but its dynamic loader can't resolve its dependencies.
-		// Node reports that as a bare "Closed with 127 signal", not a helpful
-		// missing-library error. Setting the var ourselves before the module
-		// loads makes @sparticuz/chromium run its own intended setup, exactly as
-		// its own Netlify integration (a similarly non-Lambda serverless host)
-		// does. Node's own major version decides which of its two library sets
-		// applies, rather than guessing which Vercel image is in use.
 		const nodeMajor = Number(process.versions.node.split('.')[0]);
 		process.env.AWS_LAMBDA_JS_RUNTIME ??= nodeMajor >= 20 ? 'nodejs20.x' : 'nodejs18.x';
-
 		const chromium = (await import('@sparticuz/chromium')).default;
 		return chromium.executablePath();
 	};
 
-	const outputLocation = path.join(
-		os.tmpdir(),
-		`ig-dm-reel-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`,
-	);
+	const outputLocation = path.join(os.tmpdir(), `${renderId}.mp4`);
 
-	const stream = new ReadableStream<Uint8Array>({
-		async start(controller) {
-			const encoder = new TextEncoder();
-			const send = (event: RenderEvent) => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+	setLocalRenderState(renderId, {stage: 'launching'});
 
-			let browser: Awaited<ReturnType<typeof openBrowser>> | undefined;
-			try {
-				const browserExecutable = await getBrowserExecutable();
-				const chromiumOptions = browserExecutable ? ({gl: 'swangle'} as const) : undefined;
+	// Execute rendering in the background (fire-and-forget)
+	(async () => {
+		let browser: Awaited<ReturnType<typeof openBrowser>> | undefined;
+		try {
+			const browserExecutable = await getBrowserExecutable();
+			const chromiumOptions = browserExecutable ? ({gl: 'swangle'} as const) : undefined;
 
-				send({type: 'stage', stage: 'launching'});
-				// Opened once and reused for both calls below — selectComposition
-				// and renderMedia each launch their own browser by default, and a
-				// cold headless-Chrome launch is a meaningful fraction of total
-				// render time on a fresh serverless invocation.
-				browser = await openBrowser('chrome', {browserExecutable, chromiumOptions});
+			setLocalRenderState(renderId, {stage: 'launching'});
+			browser = await openBrowser('chrome', {browserExecutable, chromiumOptions});
 
-				send({type: 'stage', stage: 'resolving'});
-				const composition = await selectComposition({
-					serveUrl: BUNDLE_DIR,
-					id: 'IgDmReel',
-					inputProps,
-					puppeteerInstance: browser,
-					browserExecutable,
-					chromiumOptions,
-				});
+			setLocalRenderState(renderId, {stage: 'resolving'});
+			const composition = await selectComposition({
+				serveUrl: BUNDLE_DIR,
+				id: 'IgDmReel',
+				inputProps,
+				puppeteerInstance: browser,
+				browserExecutable,
+				chromiumOptions,
+			});
 
-				send({type: 'stage', stage: 'rendering', totalFrames: composition.durationInFrames});
-				await renderMedia({
-					composition,
-					serveUrl: BUNDLE_DIR,
-					codec: 'h264',
-					imageFormat: 'jpeg',
-					jpegQuality: 80,
-					x264Preset: isServerlessSandbox ? 'ultrafast' : undefined,
-					outputLocation,
-					inputProps,
-					puppeteerInstance: browser,
-					browserExecutable,
-					chromiumOptions,
-					muted: true, // Skips the audio mixing step completely (free performance since there's no sound)
-					hardwareAcceleration: isServerlessSandbox ? undefined : 'if-possible',
-					concurrency: isServerlessSandbox ? 1 : undefined, // Prevent memory/CPU thrashing in constrained environments
+			setLocalRenderState(renderId, {
+				stage: 'rendering',
+				renderedFrames: 0,
+				encodedFrames: 0,
+				totalFrames: composition.durationInFrames,
+				progress: 0,
+				estimatedRemainingMs: 0,
+			});
 
-					// We let Remotion manage concurrency by default, as forcing max threads on a low-end laptop causes RAM/CPU thrashing
-					onProgress: (p) => {
-						send({
-							type: 'progress',
-							renderedFrames: p.renderedFrames,
-							encodedFrames: p.encodedFrames,
-							totalFrames: composition.durationInFrames,
-							progress: p.progress,
-							estimatedRemainingMs: p.renderEstimatedTime,
-						});
-						if (p.stitchStage === 'muxing') {
-							send({type: 'stage', stage: 'stitching'});
-						}
-					},
-				});
+			await renderMedia({
+				composition,
+				serveUrl: BUNDLE_DIR,
+				codec: 'h264',
+				imageFormat: 'jpeg',
+				jpegQuality: 80,
+				x264Preset: isServerlessSandbox ? 'ultrafast' : undefined,
+				outputLocation,
+				inputProps,
+				puppeteerInstance: browser,
+				browserExecutable,
+				chromiumOptions,
+				muted: true,
+				hardwareAcceleration: isServerlessSandbox ? undefined : 'if-possible',
+				concurrency: isServerlessSandbox ? 1 : undefined,
+				onProgress: (p) => {
+					setLocalRenderState(renderId, {
+						stage: p.stitchStage === 'muxing' ? 'stitching' : 'rendering',
+						renderedFrames: p.renderedFrames,
+						encodedFrames: p.encodedFrames,
+						totalFrames: composition.durationInFrames,
+						progress: p.progress,
+						estimatedRemainingMs: p.renderEstimatedTime,
+					});
+				},
+			});
 
-				const videoBuffer = fs.readFileSync(outputLocation);
-				send({type: 'done', dataBase64: videoBuffer.toString('base64')});
-			} catch (err) {
-				console.error('Render failed', err);
-				send({type: 'error', error: err instanceof Error ? err.message : 'Render failed.'});
-			} finally {
-				await browser?.close({silent: true}).catch(() => {});
-				fs.rm(outputLocation, {force: true}, () => {});
-				controller.close();
-			}
-		},
-	});
+			const downloadUrl = `/api/render/download?file=${encodeURIComponent(outputLocation)}`;
+			setLocalRenderState(renderId, {stage: 'done', outputFile: downloadUrl});
+		} catch (err) {
+			console.error('Local render background task failed', err);
+			setLocalRenderState(renderId, {stage: 'error', error: err instanceof Error ? err.message : 'Render failed.'});
+		} finally {
+			await browser?.close({silent: true}).catch(() => {});
+		}
+	})();
 
-	return new NextResponse(stream, {
-		status: 200,
-		headers: {
-			'Content-Type': 'application/x-ndjson; charset=utf-8',
-			'Cache-Control': 'no-store',
-		},
+	return NextResponse.json({
+		mode: 'local',
+		renderId,
+		bucketName: 'local',
 	});
 };
 
