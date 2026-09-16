@@ -6,7 +6,7 @@ export type LocalRenderState =
   | { stage: 'launching' }
   | { stage: 'resolving' }
   | { stage: 'rendering'; renderedFrames: number; encodedFrames: number; totalFrames: number; progress: number; estimatedRemainingMs: number }
-  | { stage: 'stitching' }
+  | { stage: 'stitching'; renderedFrames: number; encodedFrames: number; totalFrames: number; progress: number; estimatedRemainingMs: number }
   | { stage: 'done'; outputFile: string }
   | { stage: 'error'; error: string };
 

@@ -23,21 +23,19 @@ const BUNDLE_DIR = path.join(process.cwd(), 'remotion-bundle');
  * Render capacity, in order of preference:
  *
  * 1. Remotion Lambda, if configured (REMOTION_LAMBDA_FUNCTION_NAME set). The
- *    render runs on AWS Lambda, parallelized across many short invocations —
- *    this route only has to kick it off (sub-second) and return an id to
- *    poll. See /api/render/progress. This is what removes the "keep the
- *    connection open for however long the render takes" ceiling entirely:
- *    no single request, on Vercel or in the browser, needs to stay open for
- *    more than a couple of seconds.
- * 2. Local in-process rendering (the original design), when Lambda isn't
- *    configured — e.g. `npm run dev` without AWS set up. This still streams
- *    NDJSON progress and can take tens of seconds to minutes on a long
- *    script; see decisions.md for why that's a real ceiling on Vercel.
+ *    render runs on AWS Lambda, parallelized across many short invocations.
+ * 2. Local in-process rendering, when Lambda isn't configured — e.g.
+ *    `npm run dev` without AWS set up. The render runs as a background task
+ *    in the Node process.
+ *
+ * Both paths return a JSON response immediately with a renderId and
+ * bucketName. The client polls /api/render/progress for status updates.
+ * This design ensures no single HTTP request needs to stay open for the
+ * duration of a render.
  *
  * @remotion/renderer and @sparticuz/chromium are only ever imported inside
  * renderLocally(), dynamically — so when Lambda is configured, this route
- * never loads them at all. They're a meaningful amount of code to evaluate
- * on a cold start, for capacity this route won't use.
+ * never loads them at all.
  */
 const isLambdaConfigured = () => Boolean(process.env.REMOTION_LAMBDA_FUNCTION_NAME);
 
@@ -99,19 +97,6 @@ const renderOnLambda = async (inputProps: IgDmReelProps) => {
 
 	return NextResponse.json({mode: 'lambda', renderId, bucketName, functionName, region});
 };
-
-/**
- * One line of NDJSON per event: {"type":"stage",...} | {"type":"progress",...}
- * | {"type":"done",...} | {"type":"error",...}. The client reads the response
- * body as a stream and renders a progress bar from it — a plain buffered
- * fetch() has nothing to show until the whole render (which can run for tens
- * of seconds) has already finished.
- */
-type RenderEvent =
-	| {type: 'stage'; stage: 'launching' | 'resolving' | 'rendering' | 'stitching'; totalFrames?: number}
-	| {type: 'progress'; renderedFrames: number; encodedFrames: number; totalFrames: number; progress: number; estimatedRemainingMs: number}
-	| {type: 'done'; dataBase64: string}
-	| {type: 'error'; error: string};
 
 const renderLocally = async (inputProps: IgDmReelProps) => {
 	if (!fs.existsSync(BUNDLE_DIR)) {

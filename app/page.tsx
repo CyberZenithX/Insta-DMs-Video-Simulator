@@ -16,32 +16,12 @@ type ScriptMessage = {id: string; from: 'me' | 'them'; text: string; reaction?: 
 
 type RenderStage = 'launching' | 'resolving' | 'rendering' | 'stitching' | 'done';
 
-type RenderEvent =
-	| {type: 'stage'; stage: RenderStage; totalFrames?: number}
-	| {
-			type: 'progress';
-			renderedFrames: number;
-			encodedFrames: number;
-			totalFrames: number;
-			progress: number;
-			estimatedRemainingMs: number;
-	  }
-	| {type: 'done'; dataBase64: string}
-	| {type: 'error'; error: string};
-
 const STAGE_LABEL: Record<RenderStage, string> = {
 	launching: 'Starting renderer…',
 	resolving: 'Preparing composition…',
 	rendering: 'Rendering frames…',
 	stitching: 'Encoding video…',
 	done: 'Done',
-};
-
-const base64ToBlob = (base64: string, mimeType: string): Blob => {
-	const binary = atob(base64);
-	const bytes = new Uint8Array(binary.length);
-	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-	return new Blob([bytes], {type: mimeType});
 };
 
 const downloadUrl = (url: string, filename: string) => {
@@ -65,8 +45,6 @@ type LambdaProgress = {
 };
 
 const POLL_INTERVAL_MS = 1500;
-/** Grace period before releasing a blob URL, so the download it started can read it. */
-const REVOKE_DELAY_MS = 60_000;
 
 const THEME_OPTIONS: {value: ThemeName; label: string}[] = [
 	{value: 'none', label: 'None (classic black)'},
@@ -200,107 +178,35 @@ export default function Page() {
 				throw new Error(body?.error || `Render failed (${res.status}).`);
 			}
 
-			const contentType = res.headers.get('Content-Type') ?? '';
+			const {renderId, bucketName} = (await res.json()) as {renderId: string; bucketName: string};
 
-			if (contentType.includes('application/json')) {
-				// Remotion Lambda: this response is just "the render started" —
-				// the actual work happens on AWS, split across many short-lived
-				// Lambda invocations, not in this request. Poll for status instead
-				// of holding a connection open for however long the render takes.
-				const {renderId, bucketName} = (await res.json()) as {renderId: string; bucketName: string};
-
-				for (;;) {
-					await sleep(POLL_INTERVAL_MS);
-					const progressRes = await fetch(
-						`/api/render/progress?renderId=${encodeURIComponent(renderId)}&bucketName=${encodeURIComponent(bucketName)}`,
-					);
-					if (!progressRes.ok) {
-						const body = await progressRes.json().catch(() => null);
-						throw new Error(body?.error || `Couldn't check render status (${progressRes.status}).`);
-					}
-					const progress = (await progressRes.json()) as LambdaProgress;
-
-					if (progress.fatalErrorEncountered) {
-						throw new Error(progress.errors[0] || 'Render failed on the server.');
-					}
-
-					setRenderStage(progress.framesRendered > 0 ? 'rendering' : 'launching');
-					setRenderProgress(progress.overallProgress);
-					setRenderFrames({done: progress.framesRendered, total: 0});
-
-					if (progress.done) {
-						setRenderStage('done');
-						setRenderProgress(1);
-						if (!progress.outputFile) {
-							throw new Error('Render finished but no output file was returned.');
-						}
-						downloadUrl(progress.outputFile, 'ig-dm-reel.mp4');
-						break;
-					}
+			for (;;) {
+				await sleep(POLL_INTERVAL_MS);
+				const progressRes = await fetch(
+					`/api/render/progress?renderId=${encodeURIComponent(renderId)}&bucketName=${encodeURIComponent(bucketName)}`,
+				);
+				if (!progressRes.ok) {
+					const body = await progressRes.json().catch(() => null);
+					throw new Error(body?.error || `Couldn't check render status (${progressRes.status}).`);
 				}
-			} else {
-				if (!res.body) {
-					throw new Error('No response body from the server.');
+				const progress = (await progressRes.json()) as LambdaProgress;
+
+				if (progress.fatalErrorEncountered) {
+					throw new Error(progress.errors[0] || 'Render failed on the server.');
 				}
 
-				// The local-render fallback streams newline-delimited JSON progress
-				// events, ending with either a `done` event carrying the base64
-				// video or an `error` event — a plain buffered response has nothing
-				// to show until a render that can take tens of seconds has already
-				// finished.
-				const reader = res.body.getReader();
-				const decoder = new TextDecoder();
-				let buffer = '';
-				let finished = false;
+				setRenderStage(progress.framesRendered > 0 ? 'rendering' : 'launching');
+				setRenderProgress(progress.overallProgress);
+				setRenderFrames({done: progress.framesRendered, total: 0});
 
-				while (!finished) {
-					const {done, value} = await reader.read();
-					if (done) break;
-					buffer += decoder.decode(value, {stream: true});
-
-					while (buffer.includes('\n')) {
-						const newlineIndex = buffer.indexOf('\n');
-						const line = buffer.slice(0, newlineIndex);
-						buffer = buffer.slice(newlineIndex + 1);
-						if (!line.trim()) continue;
-
-						const event = JSON.parse(line) as RenderEvent;
-
-						if (event.type === 'stage') {
-							setRenderStage(event.stage);
-							if (event.totalFrames) setRenderFrames({done: 0, total: event.totalFrames});
-						} else if (event.type === 'progress') {
-							setRenderStage('rendering');
-							setRenderProgress(event.progress);
-							setRenderFrames({done: event.renderedFrames, total: event.totalFrames});
-							setEtaMs(event.estimatedRemainingMs);
-						} else if (event.type === 'done') {
-							setRenderStage('done');
-							setRenderProgress(1);
-							const blob = base64ToBlob(event.dataBase64, 'video/mp4');
-							const url = URL.createObjectURL(blob);
-							downloadUrl(url, 'ig-dm-reel.mp4');
-							// Revoking synchronously races the download the click
-							// just started: the browser may not have read the blob
-							// yet, and the save silently fails. Let the click settle
-							// first — the object URL still gets released.
-							setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
-							finished = true;
-						} else if (event.type === 'error') {
-							throw new Error(event.error);
-						}
+				if (progress.done) {
+					setRenderStage('done');
+					setRenderProgress(1);
+					if (!progress.outputFile) {
+						throw new Error('Render finished but no output file was returned.');
 					}
-				}
-
-				// The stream can end without ever delivering `done` or `error` —
-				// a dropped connection, or the serverless function hitting its own
-				// duration limit part-way through a long render. Without this the
-				// loop just falls through: no video, no message, and the progress
-				// UI resets as if the render had succeeded.
-				if (!finished) {
-					throw new Error(
-						'The render stopped before it finished — the connection closed early. Try a shorter script, or configure Remotion Lambda so renders are not bound by one request.',
-					);
+					downloadUrl(progress.outputFile, 'ig-dm-reel.mp4');
+					break;
 				}
 			}
 		} catch (err) {
