@@ -137,7 +137,7 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 
 	const outputLocation = path.join(os.tmpdir(), `${renderId}.mp4`);
 
-	setLocalRenderState(renderId, {stage: 'launching'});
+	await setLocalRenderState(renderId, {stage: 'launching'});
 
 	// Execute rendering in the background (fire-and-forget)
 	(async () => {
@@ -146,7 +146,6 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 			const browserExecutable = await getBrowserExecutable();
 			const chromiumOptions = browserExecutable ? ({gl: 'swangle'} as const) : undefined;
 
-			setLocalRenderState(renderId, {stage: 'launching'});
 			browser = await openBrowser('chrome', {browserExecutable, chromiumOptions});
 
 			setLocalRenderState(renderId, {stage: 'resolving'});
