@@ -12,13 +12,14 @@ export const ReactionBadge: React.FC<{reaction: ReactionRender; side: 'me' | 'th
 	const emojiToken = tokens.find((t) => t.type === 'emoji');
 	const inset = reaction.sizePx * geometry.reactionBadgeInset;
 	const left = side === 'me' ? reaction.x - reaction.sizePx + inset : reaction.x - inset;
+	const top = reaction.y - reaction.sizePx * geometry.reactionBadgeVerticalOffset;
 
 	return (
 		<div
 			style={{
 				position: 'absolute',
-				left,
-				top: reaction.y - reaction.sizePx * geometry.reactionBadgeVerticalOffset,
+				left: 0,
+				top: 0,
 				width: reaction.sizePx,
 				height: reaction.sizePx,
 				borderRadius: '50%',
@@ -28,7 +29,7 @@ export const ReactionBadge: React.FC<{reaction: ReactionRender; side: 'me' | 'th
 				alignItems: 'center',
 				justifyContent: 'center',
 				opacity: reaction.opacity,
-				transform: `scale(${reaction.scale})`,
+				transform: `translate3d(${left}px, ${top}px, 0) scale(${reaction.scale})`,
 				transformOrigin: 'center',
 				boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
 			}}

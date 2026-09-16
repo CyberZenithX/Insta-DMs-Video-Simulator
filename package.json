@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "lambda:print-policies": "node scripts/lambda-print-policies.mjs",
     "lambda:deploy-function": "node scripts/lambda-deploy-function.mjs",
-    "lambda:deploy-site": "node scripts/lambda-deploy-site.mjs"
+    "lambda:deploy-site": "node scripts/lambda-deploy-site.mjs",
+    "render:local:mac": "remotion render src/index.ts IgDmReel out/video.mp4 --hardware-acceleration=if-possible --muted",
+    "render:local:pc": "remotion render src/index.ts IgDmReel out/video.mp4 --hardware-acceleration=if-possible --muted"
   },
   "dependencies": {
     "@remotion/bundler": "^4.0.290",

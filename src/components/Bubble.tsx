@@ -10,7 +10,7 @@ import {EmojiImage} from '../emoji/EmojiText';
 import type {GradientStop} from '../themes';
 import type {SafeZones} from '../types';
 
-const WrappedLineView: React.FC<{line: WrappedLine; fontSizePx: number}> = ({line, fontSizePx}) => (
+const WrappedLineView = React.memo<{line: WrappedLine; fontSizePx: number}>(({line, fontSizePx}) => (
 	<div style={{whiteSpace: 'pre'}}>
 		{line.map((unit, i) => {
 			if (unit.kind === 'emoji') {
@@ -19,9 +19,9 @@ const WrappedLineView: React.FC<{line: WrappedLine; fontSizePx: number}> = ({lin
 			return <React.Fragment key={i}>{unit.text}</React.Fragment>;
 		})}
 	</div>
-);
+));
 
-const TypingDots: React.FC<{frame: number; fps: number; sizePx: number; opacity: number}> = ({
+const TypingDots = React.memo<{frame: number; fps: number; sizePx: number; opacity: number}>(({
 	frame,
 	fps,
 	sizePx,
@@ -51,7 +51,7 @@ const TypingDots: React.FC<{frame: number; fps: number; sizePx: number; opacity:
 			})}
 		</div>
 	);
-};
+});
 
 export const Bubble: React.FC<{
 	row: RenderRow;
@@ -96,14 +96,14 @@ export const Bubble: React.FC<{
 		<div
 			style={{
 				position: 'absolute',
-				left,
-				top: topViewport,
+				left: 0,
+				top: 0,
 				width: row.widthPx,
 				height: row.heightPx,
 				borderRadius: radiusPx,
 				background,
 				opacity,
-				transform: `translateY(${translateYPx}px) scale(${scale})`,
+				transform: `translate3d(${left}px, ${topViewport + translateYPx}px, 0) scale(${scale})`,
 				transformOrigin,
 				display: 'flex',
 				alignItems: 'center',
