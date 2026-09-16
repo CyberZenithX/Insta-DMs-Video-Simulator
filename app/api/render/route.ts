@@ -122,7 +122,12 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 
 	const outputLocation = path.join(os.tmpdir(), `${renderId}.mp4`);
 
-	await setLocalRenderState(renderId, {stage: 'launching'});
+	// Write initial state SYNCHRONOUSLY so the file is guaranteed on disk
+	// before the HTTP response is returned and the client starts polling.
+	// If this were async there's a race window where the first poll hits
+	// before the write completes → "Local render not found" 404.
+	const stateFilePath = path.join(os.tmpdir(), `${renderId}-state.json`);
+	fs.writeFileSync(stateFilePath, JSON.stringify({stage: 'launching'}), 'utf-8');
 
 	// Execute rendering in the background (fire-and-forget)
 	(async () => {
