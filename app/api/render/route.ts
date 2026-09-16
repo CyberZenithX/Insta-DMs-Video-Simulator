@@ -141,6 +141,7 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 				puppeteerInstance: browser,
 				browserExecutable,
 				chromiumOptions,
+				timeoutInMilliseconds: 120_000, // 2 min — low-end machines can take 60s+ to evaluate the bundle
 			});
 
 			setLocalRenderState(renderId, {
@@ -167,6 +168,7 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 				muted: true,
 				hardwareAcceleration: isServerlessSandbox ? undefined : 'if-possible',
 				concurrency: isServerlessSandbox ? 1 : undefined,
+				timeoutInMilliseconds: 120_000, // 2 min per-frame timeout — prevents Remotion's default 30s from killing slow renders
 				onProgress: (p) => {
 					setLocalRenderState(renderId, {
 						stage: p.stitchStage === 'muxing' ? 'stitching' : 'rendering',
