@@ -12,16 +12,34 @@ export async function GET(request: Request) {
 	const functionName = process.env.REMOTION_LAMBDA_FUNCTION_NAME;
 	const region = process.env.REMOTION_LAMBDA_REGION as AwsRegion | undefined;
 
-	if (!functionName || !region) {
-		return NextResponse.json({error: 'Remotion Lambda is not configured on this deployment.'}, {status: 500});
-	}
-
 	const {searchParams} = new URL(request.url);
 	const renderId = searchParams.get('renderId');
 	const bucketName = searchParams.get('bucketName');
 
 	if (!renderId || !bucketName) {
 		return NextResponse.json({error: 'renderId and bucketName query params are required.'}, {status: 400});
+	}
+
+	if (bucketName === 'local') {
+		const {getLocalRenderState} = await import('../../../../src/lib/localRenderStore');
+		const state = getLocalRenderState(renderId);
+		
+		if (!state) {
+			return NextResponse.json({error: 'Local render not found.'}, {status: 404});
+		}
+
+		return NextResponse.json({
+			done: state.stage === 'done',
+			overallProgress: state.stage === 'done' ? 1 : state.stage === 'error' ? 0 : ('progress' in state ? state.progress : 0),
+			framesRendered: 'renderedFrames' in state ? state.renderedFrames : 0,
+			fatalErrorEncountered: state.stage === 'error',
+			errors: state.stage === 'error' ? [state.error] : [],
+			outputFile: state.stage === 'done' ? state.outputFile : null,
+		});
+	}
+
+	if (!functionName || !region) {
+		return NextResponse.json({error: 'Remotion Lambda is not configured on this deployment.'}, {status: 500});
 	}
 
 	try {
