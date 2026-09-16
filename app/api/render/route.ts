@@ -189,6 +189,9 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 					composition,
 					serveUrl: BUNDLE_DIR,
 					codec: 'h264',
+					imageFormat: 'jpeg',
+					jpegQuality: 80,
+					x264Preset: isServerlessSandbox ? 'ultrafast' : undefined,
 					outputLocation,
 					inputProps,
 					puppeteerInstance: browser,
@@ -196,6 +199,8 @@ const renderLocally = async (inputProps: IgDmReelProps) => {
 					chromiumOptions,
 					muted: true, // Skips the audio mixing step completely (free performance since there's no sound)
 					hardwareAcceleration: isServerlessSandbox ? undefined : 'if-possible',
+					concurrency: isServerlessSandbox ? 1 : undefined, // Prevent memory/CPU thrashing in constrained environments
+
 					// We let Remotion manage concurrency by default, as forcing max threads on a low-end laptop causes RAM/CPU thrashing
 					onProgress: (p) => {
 						send({
