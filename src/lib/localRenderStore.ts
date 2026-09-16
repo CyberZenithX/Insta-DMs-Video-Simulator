@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 export type LocalRenderState = 
   | { stage: 'launching' }
   | { stage: 'resolving' }
@@ -6,12 +10,18 @@ export type LocalRenderState =
   | { stage: 'done'; outputFile: string }
   | { stage: 'error'; error: string };
 
-const globalStore = global as typeof globalThis & {
-	__LOCAL_RENDER_STORE__?: Map<string, LocalRenderState>;
+const getStatePath = (id: string) => path.join(os.tmpdir(), `${id}-state.json`);
+
+export const getLocalRenderState = (id: string): LocalRenderState | undefined => {
+	const p = getStatePath(id);
+	if (!fs.existsSync(p)) return undefined;
+	try {
+		return JSON.parse(fs.readFileSync(p, 'utf-8')) as LocalRenderState;
+	} catch {
+		return undefined;
+	}
 };
 
-const store = globalStore.__LOCAL_RENDER_STORE__ ?? new Map<string, LocalRenderState>();
-globalStore.__LOCAL_RENDER_STORE__ = store;
-
-export const getLocalRenderState = (id: string) => store.get(id);
-export const setLocalRenderState = (id: string, state: LocalRenderState) => store.set(id, state);
+export const setLocalRenderState = (id: string, state: LocalRenderState) => {
+	fs.writeFileSync(getStatePath(id), JSON.stringify(state), 'utf-8');
+};
