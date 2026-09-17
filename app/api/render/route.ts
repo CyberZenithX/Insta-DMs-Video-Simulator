@@ -78,9 +78,17 @@ const renderOnLambda = async (inputProps: IgDmReelProps) => {
 	// lowers the invocation count proportionally, trading render speed for
 	// staying under a low quota. See AWS_LAMBDA_SETUP.md's Troubleshooting
 	// section.
+	// framesPerLambda env var still accepted for tuning, but floored at 10 000
+	// so all frames always land in a single renderer invocation on this AWS
+	// account (concurrent-execution quota: 400, but freshly restricted).
+	// 1 orchestrator + 1 renderer + 1 stitcher = 3 concurrent executions max,
+	// which is guaranteed to never rate-limit regardless of account age.
 	const framesPerLambdaEnv = process.env.REMOTION_LAMBDA_FRAMES_PER_LAMBDA;
-	const framesPerLambda = framesPerLambdaEnv ? Number(framesPerLambdaEnv) : undefined;
-	if (framesPerLambdaEnv && (!Number.isInteger(framesPerLambda) || (framesPerLambda as number) <= 0)) {
+	const framesPerLambda = Math.max(
+		framesPerLambdaEnv ? Number(framesPerLambdaEnv) : 10_000,
+		10_000,
+	);
+	if (!Number.isInteger(framesPerLambda) || framesPerLambda <= 0) {
 		throw new Error('REMOTION_LAMBDA_FRAMES_PER_LAMBDA must be a positive integer.');
 	}
 
@@ -92,12 +100,13 @@ const renderOnLambda = async (inputProps: IgDmReelProps) => {
 		inputProps,
 		codec: 'h264',
 		privacy: 'public',
-		...(framesPerLambda ? {framesPerLambda} : {}),
-		// 1 browser tab per Lambda invocation. Keeps the per-invocation memory
-		// well under 2 GB and — more importantly on a fresh AWS account —
-		// dramatically reduces the Lambda:InvokeFunction TPS the orchestrator
-		// emits, preventing TooManyRequestsException ("Rate Exceeded") errors.
+		framesPerLambda,
+		// 1 browser tab per Lambda invocation to minimise memory pressure inside
+		// the single renderer Lambda and avoid any per-invocation TPS spikes.
 		concurrencyPerLambda: 1,
+		// No retries — if the renderer fails, report it immediately rather than
+		// re-invoking and creating a cascade that looks like rate limiting.
+		maxRetries: 0,
 	});
 
 	return NextResponse.json({mode: 'lambda', renderId, bucketName, functionName, region});
