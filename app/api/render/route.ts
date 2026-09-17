@@ -93,6 +93,11 @@ const renderOnLambda = async (inputProps: IgDmReelProps) => {
 		codec: 'h264',
 		privacy: 'public',
 		...(framesPerLambda ? {framesPerLambda} : {}),
+		// 1 browser tab per Lambda invocation. Keeps the per-invocation memory
+		// well under 2 GB and — more importantly on a fresh AWS account —
+		// dramatically reduces the Lambda:InvokeFunction TPS the orchestrator
+		// emits, preventing TooManyRequestsException ("Rate Exceeded") errors.
+		concurrencyPerLambda: 1,
 	});
 
 	return NextResponse.json({mode: 'lambda', renderId, bucketName, functionName, region});
