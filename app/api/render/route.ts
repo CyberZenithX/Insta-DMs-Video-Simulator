@@ -78,15 +78,16 @@ const renderOnLambda = async (inputProps: IgDmReelProps) => {
 	// lowers the invocation count proportionally, trading render speed for
 	// staying under a low quota. See AWS_LAMBDA_SETUP.md's Troubleshooting
 	// section.
-	// framesPerLambda env var still accepted for tuning, but floored at 10 000
-	// so all frames always land in a single renderer invocation on this AWS
-	// account (concurrent-execution quota: 400, but freshly restricted).
-	// 1 orchestrator + 1 renderer + 1 stitcher = 3 concurrent executions max,
-	// which is guaranteed to never rate-limit regardless of account age.
+	// framesPerLambda env var still accepted for tuning, floored at 400.
+	// At 400 frames/invocation, a 4683-frame (~156s) video uses ~12 concurrent
+	// renderer invocations — comfortably under the 400 concurrent-execution quota,
+	// and each chunk finishes in a couple of minutes rather than the whole render
+	// timing out in one invocation that can't finish before 900s.
+	// Lower this (e.g. 100) once your quota increase lands for faster renders.
 	const framesPerLambdaEnv = process.env.REMOTION_LAMBDA_FRAMES_PER_LAMBDA;
 	const framesPerLambda = Math.max(
-		framesPerLambdaEnv ? Number(framesPerLambdaEnv) : 10_000,
-		10_000,
+		framesPerLambdaEnv ? Number(framesPerLambdaEnv) : 400,
+		400,
 	);
 	if (!Number.isInteger(framesPerLambda) || framesPerLambda <= 0) {
 		throw new Error('REMOTION_LAMBDA_FRAMES_PER_LAMBDA must be a positive integer.');
