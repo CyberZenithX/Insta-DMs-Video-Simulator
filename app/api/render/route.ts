@@ -78,20 +78,29 @@ const renderOnLambda = async (inputProps: IgDmReelProps) => {
 	// lowers the invocation count proportionally, trading render speed for
 	// staying under a low quota. See AWS_LAMBDA_SETUP.md's Troubleshooting
 	// section.
-	// framesPerLambda env var still accepted for tuning, floored at 400.
-	// At 400 frames/invocation, a 4683-frame (~156s) video uses ~12 concurrent
-	// renderer invocations — comfortably under the 400 concurrent-execution quota,
-	// and each chunk finishes in a couple of minutes rather than the whole render
-	// timing out in one invocation that can't finish before 900s.
-	// Lower this (e.g. 100) once your quota increase lands for faster renders.
+	// Keep chunks inside a safe band for this account's restricted Lambda quota.
+	// 400 frames created ~12 renderer invocations for a 4683-frame reel and was
+	// throttled. 10,000 frames put the whole reel into one invocation, which can
+	// exceed Lambda's 900-second maximum. 1,000-1,500 frames keeps typical
+	// 25-40-message reels to roughly 4-6 renderer invocations while ensuring no
+	// single renderer is responsible for the entire video.
+	const MIN_FRAMES_PER_LAMBDA = 1_000;
+	const MAX_FRAMES_PER_LAMBDA = 1_500;
 	const framesPerLambdaEnv = process.env.REMOTION_LAMBDA_FRAMES_PER_LAMBDA;
-	const framesPerLambda = Math.max(
-		framesPerLambdaEnv ? Number(framesPerLambdaEnv) : 400,
-		400,
-	);
-	if (!Number.isInteger(framesPerLambda) || framesPerLambda <= 0) {
+	const configuredFramesPerLambda = framesPerLambdaEnv
+		? Number(framesPerLambdaEnv)
+		: MIN_FRAMES_PER_LAMBDA;
+
+	if (!Number.isInteger(configuredFramesPerLambda) || configuredFramesPerLambda <= 0) {
 		throw new Error('REMOTION_LAMBDA_FRAMES_PER_LAMBDA must be a positive integer.');
 	}
+
+	// Clamp stale Vercel values too: an old 400 or 10,000 setting must not be
+	// able to reintroduce throttling or the 900-second timeout after this deploy.
+	const framesPerLambda = Math.min(
+		Math.max(configuredFramesPerLambda, MIN_FRAMES_PER_LAMBDA),
+		MAX_FRAMES_PER_LAMBDA,
+	);
 
 	const {renderId, bucketName} = await renderMediaOnLambda({
 		region,
