@@ -135,7 +135,7 @@ Set on the Vercel deployment to switch both `/api/render` and `/api/render/progr
 | `REMOTION_LAMBDA_SERVE_URL` | Printed by `npm run lambda:deploy-site` |
 | `REMOTION_LAMBDA_REGION` | Whichever `--region=` you passed to both scripts (default `us-east-1`) |
 | `REMOTION_AWS_ACCESS_KEY_ID` / `REMOTION_AWS_SECRET_ACCESS_KEY` | An IAM user's access keys — see `npm run lambda:print-policies` for the exact policy to attach |
-| `REMOTION_LAMBDA_FRAMES_PER_LAMBDA` (optional) | Caps how many concurrent Lambda invocations one render fans out to, by raising frames handled per invocation. Unset = Remotion's own estimate (20 frames each). Bounded at the top by the deployed function's timeout, since one invocation must finish its whole chunk within it — see AWS_LAMBDA_SETUP.md's Troubleshooting → `Rate Exceeded.` and `The main function timed out`. |
+| `REMOTION_LAMBDA_FRAMES_PER_LAMBDA` (optional) | Frames handled by each renderer invocation. The route defaults to 1,000 and clamps configured values to 1,000–1,500, preventing low values from exceeding the restricted concurrency quota and high values from pushing a single chunk toward the 900-second function timeout. |
 
 Two render limits are *not* env vars: the deployed function's **timeout** (900s, AWS's maximum) and **memory** (2048MB), both set by `scripts/lambda-deploy-function.mjs` and baked into the function's name. The timeout is the hard ceiling on total render wall time. Changing either deploys a differently-named function, so `REMOTION_LAMBDA_FUNCTION_NAME` has to be repointed afterwards.
 
